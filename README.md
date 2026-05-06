@@ -10,7 +10,7 @@
 <div align="center">
   <a href="#overview">Overview</a> •
   <a href="#leaderboard">LeaderBoard</a> •
-  <a href="#Workspace-bench-distribution">Workspace-Bench Distribution</a> •
+  <a href="#dataset-introduction">Dataset Introduction</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#arxiv-link">arXiv</a>
 </div>
@@ -48,7 +48,7 @@ The figure above shows rubric pass rates on Workspace-Bench-Lite across multiple
 It highlights that strong foundation models matter, but harness design still plays a major role in efficiency, cost, and final performance.
 Detailed leaderboard tables, per-model breakdowns, and additional analyses will be released together with the public benchmark release.
 
-## Workspace-Bench Distribution
+## Dataset Introduction
 
 The full dataset is **coming soon**.
 We plan to release task specifications, input files, standardized output formats, and evaluation scripts where applicable.
@@ -82,7 +82,6 @@ If you use Workspace-Bench in your research, please cite our paper once the arXi
       eprint={2605.03596},
       archivePrefix={arXiv},
       primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2605.03596}, 
+      url={https://arxiv.org/abs/2605.03596}
 }
 ```
-
