@@ -8,16 +8,6 @@
 </div>
 
 <div align="center">
-  <a href="#overview">Overview</a> •
-  <a href="#leaderboard">LeaderBoard</a> •
-  <a href="#dataset-introduction">Dataset Introduction</a> •
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#arxiv-link">arXiv</a>
-</div>
-
-<br />
-
-<div align="center">
   <a href="https://workspace-bench.github.io/">
     <img alt="Project Page" src="https://img.shields.io/badge/Project%20Page-Workspace--Bench-4c6ef5?logo=googlechrome&logoColor=white" />
   </a>
@@ -33,10 +23,11 @@
 </div>
 
 <div align="center">
-  <a href="https://workspace-bench.github.io/">Website</a> •
-  <a href="https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench">Dataset</a> •
-  <a href="https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench-Lite">Lite Dataset</a> •
-  <a href="https://arxiv.org/abs/2605.03596">Paper</a>
+  <a href="#overview">Overview</a> •
+  <a href="#leaderboard">LeaderBoard</a> •
+  <a href="#dataset-introduction">Dataset Introduction</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#arxiv-link">arXiv</a>
 </div>
 
 <br />
