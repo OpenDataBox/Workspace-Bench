@@ -17,6 +17,30 @@
 
 <br />
 
+<div align="center">
+  <a href="https://workspace-bench.github.io/">
+    <img alt="Project Page" src="https://img.shields.io/badge/Project%20Page-Workspace--Bench-4c6ef5?logo=googlechrome&logoColor=white" />
+  </a>
+  <a href="https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench">
+    <img alt="Dataset" src="https://img.shields.io/badge/Hugging%20Face-Full%20Dataset-ff9f1c?logo=huggingface&logoColor=white" />
+  </a>
+  <a href="https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench-Lite">
+    <img alt="Lite Dataset" src="https://img.shields.io/badge/Hugging%20Face-Lite%20Dataset-f76707?logo=huggingface&logoColor=white" />
+  </a>
+  <a href="https://arxiv.org/abs/2605.03596">
+    <img alt="arXiv Paper" src="https://img.shields.io/badge/arXiv-2605.03596-b31b1b?logo=arxiv&logoColor=white" />
+  </a>
+</div>
+
+<div align="center">
+  <a href="https://workspace-bench.github.io/">Website</a> •
+  <a href="https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench">Dataset</a> •
+  <a href="https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench-Lite">Lite Dataset</a> •
+  <a href="https://arxiv.org/abs/2605.03596">Paper</a>
+</div>
+
+<br />
+
 ## Overview
 
 Workspace-Bench 1.0 is a benchmark for evaluating AI agents on **workspace tasks with large-scale file dependencies**. It is built to study a capability we call **Workspace Learning**: whether an agent can identify, reason over, exploit, and update explicit and implicit dependencies among heterogeneous files in a real worker's workspace.
