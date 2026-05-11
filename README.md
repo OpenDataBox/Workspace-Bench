@@ -33,7 +33,7 @@
 <br />
 
 ## 📰 News
-* **[May 07, 2025]**: The full datasets of Version 1.0 are released ([homepage](https://workspace-bench.github.io/), [huggingface](https://huggingface.co/datasets/SWE-bench/SWE-bench_Multimodal))!
+* **[May 07, 2025]**: The full datasets of Version 1.0 are released ([homepage](https://workspace-bench.github.io/), [huggingface](https://huggingface.co/Workspace-Bench))!
 
 ## 👋 Overview
 
