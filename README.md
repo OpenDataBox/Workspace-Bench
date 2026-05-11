@@ -53,7 +53,7 @@ Workspace-Bench is a benchmark for evaluating AI agents on **workspace tasks wit
   <img src="assets/rubrics_success.png" alt="Rubrics success rate across agent settings" width="980" />
 </div>
 
-Rubric pass rates on Workspace-Bench-Lite across multiple combinations of agent harnesses and backbone [See Details](https://workspace-bench.github.io/leaderboard.html).
+Rubric pass rates on Workspace-Bench-Lite across multiple combinations of agent harnesses and backbone LLMs [See Details](https://workspace-bench.github.io/leaderboard.html).
 
 <!-- LLMs.
 It highlights that strong foundation models matter, but harness design still plays a major role in efficiency, cost, and final performance.
@@ -107,10 +107,10 @@ The public release will include the necessary task assets, output specifications
 
 <p align="left">
   <a href="https://www.larksuite.com/" target="_blank">
-    <img src="assets/lark-logo.png" alt="Lark / Feishu" height="48">
+    <img src="assets/lark-logo.png" alt="Lark / Feishu" height="90">
   </a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.sjtu.edu.cn/" target="_blank">
-    <img src="assets/sjtu-logo.png" alt="Shanghai Jiao Tong University" height="48">
+    <img src="assets/sjtu-logo.png" alt="Shanghai Jiao Tong University" height="90">
   </a>
 </p>
