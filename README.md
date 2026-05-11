@@ -22,23 +22,50 @@
   </a>
 </div>
 
-<div align="center">
+<!-- <div align="center">
   <a href="#overview">Overview</a> •
   <a href="#leaderboard">LeaderBoard</a> •
   <a href="#dataset-introduction">Dataset Introduction</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#arxiv-link">arXiv</a>
-</div>
+</div> -->
 
 <br />
 
-## Overview
+## 📰 News
+* **[May 07, 2025]**: The full datasets of Version 1.0 are released ([homepage](https://workspace-bench.github.io/), [huggingface](https://huggingface.co/datasets/SWE-bench/SWE-bench_Multimodal))!
 
-Workspace-Bench 1.0 is a benchmark for evaluating AI agents on **workspace tasks with large-scale file dependencies**. It is built to study a capability we call **Workspace Learning**: whether an agent can identify, reason over, exploit, and update explicit and implicit dependencies among heterogeneous files in a real worker's workspace.
+## 👋 Overview
 
-Unlike benchmarks that either place all information directly in the prompt or provide a small bundle of task-specific files, Workspace-Bench evaluates agents in realistic workspaces where they must independently explore directories, locate relevant evidence, understand cross-file relations, and produce correct deliverables. The benchmark is centered on real-world workplace behavior rather than isolated tool-use or single-file question answering.
+Workspace-Bench is a benchmark for evaluating AI agents on **workspace tasks with large-scale file dependencies**. It is built to study a capability we call **Workspace Learning**: whether an agent can identify, reason over, exploit, and update explicit and implicit dependencies among heterogeneous files in a real worker's workspace.
+
+<div align="center">
+  <img src="assets/Frameworkv2.png" alt="Workspace-Bench framework overview" width="980" />
+</div>
+
+<!-- Unlike benchmarks that either place all information directly in the prompt or provide a small bundle of task-specific files, Workspace-Bench evaluates agents in realistic workspaces where they must independently explore directories, locate relevant evidence, understand cross-file relations, and produce correct deliverables. The benchmark is centered on real-world workplace behavior rather than isolated tool-use or single-file question answering. -->
+
+<!-- The figure above illustrates the overall design of Workspace-Bench. Agents are placed into role-specific workspaces with realistic cross-file dependent tasks, and are evaluated with capability-oriented rubrics that measure not only final correctness but also the ability to navigate complex workspace structure and file relations. -->
+
+## 💫 LeaderBoard
+
+<div align="center">
+  <img src="assets/rubrics_success.png" alt="Rubrics success rate across agent settings" width="980" />
+</div>
+
+Rubric pass rates on Workspace-Bench-Lite across multiple combinations of agent harnesses and backbone [See Details](https://workspace-bench.github.io/leaderboard.html).
+
+<!-- LLMs.
+It highlights that strong foundation models matter, but harness design still plays a major role in efficiency, cost, and final performance.
+Detailed leaderboard tables, per-model breakdowns, and additional analyses will be released together with the public benchmark release -->
+
+## 💽 Dataset Introduction
 
 Workspace-Bench contains:
+
+<div align="center">
+  <img src="assets/Distribution.png" alt="Workspace-Bench dataset distribution" width="980" />
+</div>
 
 - **5** realistic worker profiles: Operations Manager, Logistics Manager, AI Product Manager, Researcher, and Backend Developer
 - **74** file types across heterogeneous workspace environments
@@ -47,47 +74,22 @@ Workspace-Bench contains:
 - **7,399** fine-grained rubrics for evaluation
 - **Workspace-Bench-Lite**, a 100-task subset that preserves the benchmark distribution while reducing evaluation cost by about **70%**
 
-<div align="center">
-  <img src="assets/Framework.png" alt="Workspace-Bench framework overview" width="980" />
-</div>
 
-The figure above illustrates the overall design of Workspace-Bench. Agents are placed into role-specific workspaces with realistic cross-file dependent tasks, and are evaluated with capability-oriented rubrics that measure not only final correctness but also the ability to navigate complex workspace structure and file relations.
 
-## LeaderBoard
+<!-- The distribution figure summarizes the current benchmark composition from several perspectives: file types, task abilities, task difficulty, workspace allocation, rubric counts, required files per task, and dependency edge counts. -->
+<!-- These statistics reflect the diversity and complexity of Workspace-Bench and show that the benchmark is not limited to a single file format, workspace style, or task pattern. -->
+<!-- In particular, Workspace-Bench covers multiple professional roles and difficulty levels, while preserving rich inter-file dependency structures that are essential for realistic workspace evaluation. -->
 
-<div align="center">
-  <img src="assets/rubrics_success.png" alt="Rubrics success rate across agent settings" width="980" />
-</div>
-
-The figure above shows rubric pass rates on Workspace-Bench-Lite across multiple combinations of agent harnesses and backbone LLMs.
-It highlights that strong foundation models matter, but harness design still plays a major role in efficiency, cost, and final performance.
-Detailed leaderboard tables, per-model breakdowns, and additional analyses will be released together with the public benchmark release.
-
-## Dataset Introduction
-
-The full dataset is **coming soon**.
-We plan to release task specifications, input files, standardized output formats, and evaluation scripts where applicable.
-
-<div align="center">
-  <img src="assets/Distribution.png" alt="Workspace-Bench dataset distribution" width="980" />
-</div>
-
-The distribution figure summarizes the current benchmark composition from several perspectives: file types, task abilities, task difficulty, workspace allocation, rubric counts, required files per task, and dependency edge counts.
-These statistics reflect the diversity and complexity of Workspace-Bench and show that the benchmark is not limited to a single file format, workspace style, or task pattern.
-In particular, Workspace-Bench covers multiple professional roles and difficulty levels, while preserving rich inter-file dependency structures that are essential for realistic workspace evaluation.
-
-## Quick Start
+## 🚀 Quick Start
 
 **Coming soon.**
 
 We will release the dataset, evaluation pipeline, and example usage instructions for running agents on Workspace-Bench and Workspace-Bench-Lite.
 The public release will include the necessary task assets, output specifications, and benchmarking scripts.
 
-## arXiv Link
+## 🔎 Publications
+- [Workspace-Bench 1.0: Benchmarking AI Agents on Workspace Tasks with Large-Scale File Dependencies](https://arxiv.org/abs/2605.03596)
 
-Paper link: https://arxiv.org/abs/2605.03596
-
-If you use Workspace-Bench in your research, please cite our paper once the arXiv version is available.
 
 ```bibtex
 @misc{tang2026workspacebench10benchmarkingai,
@@ -100,3 +102,15 @@ If you use Workspace-Bench in your research, please cite our paper once the arXi
       url={https://arxiv.org/abs/2605.03596}
 }
 ```
+
+## 🤝 Acknowledgement
+
+<p align="left">
+  <a href="https://www.larksuite.com/" target="_blank">
+    <img src="assets/lark-logo.png" alt="Lark / Feishu" height="48">
+  </a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.sjtu.edu.cn/" target="_blank">
+    <img src="assets/sjtu-logo.png" alt="Shanghai Jiao Tong University" height="48">
+  </a>
+</p>
