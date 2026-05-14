@@ -1,4 +1,0 @@
-model_name: cc-MiniMax-M2.7  # 模型名称
-baseUrl: https://api.minimaxi.com/anthropic # API提供者的URL
-model: MiniMax-M2.7  # 模型名称
-apiKey: "${JUDGE_API_KEY:-${MINIMAXM27_API_KEY}}"

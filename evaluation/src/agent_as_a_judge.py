@@ -5,6 +5,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import random
+import re
 import shutil
 import time
 from datetime import datetime, timezone
@@ -29,7 +30,31 @@ def _iso_now() -> str:
 def _read_yaml(path: str) -> Dict[str, Json]:
     with open(path, "r", encoding="utf-8") as f:
         obj = yaml.safe_load(f)
-    return obj if isinstance(obj, dict) else {}
+    return _expand_config_env(obj) if isinstance(obj, dict) else {}
+
+
+def _expand_env_string(value: str) -> str:
+    fallback_re = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)[:-]-(\$\{[A-Za-z_][A-Za-z0-9_]*\}|[^}]*)\}")
+    s = value
+    while True:
+        m = fallback_re.search(s)
+        if not m:
+            break
+        primary = os.environ.get(m.group(1), "")
+        fallback = m.group(2)
+        repl = primary if primary else os.path.expandvars(fallback)
+        s = s[: m.start()] + repl + s[m.end() :]
+    return os.path.expandvars(s)
+
+
+def _expand_config_env(value: Json) -> Json:
+    if isinstance(value, str):
+        return _expand_env_string(value)
+    if isinstance(value, list):
+        return [_expand_config_env(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _expand_config_env(v) for k, v in value.items()}
+    return value
 
 
 def _safe_load_json(path: str) -> Optional[Json]:
@@ -501,65 +526,9 @@ if __name__ == "__main__":
             # print(json.dumps(_, ensure_ascii=False, indent=2))
 
 """
-/home/tangzirui/miniconda3/bin/python src/agent_as_a_judge.py \
-    --task-dir /path/to/Workspace-Bench/evaluation/output/ClaudeCode--Kimi-2.5--Test-Rubrics-Checked \
-    --eval-yaml /path/to/Workspace-Bench/evaluation/runs/Eval--cc-Seed-2.0-Lite.yaml \
+python3 src/agent_as_a_judge.py \
+    --task-dir /path/to/Workspace-Bench/evaluation/output/Codex--Kimi-K2.5--Lite \
+    --eval-yaml /path/to/Workspace-Bench/evaluation/runs/judge.yaml \
     --parallel \
     --workers 3
-
-/home/tangzirui/miniconda3/bin/python src/agent_as_a_judge.py \
-    --task-dir /path/to/Workspace-Bench/evaluation/output/ClaudeCode--MiniMax-M2.7--Test-Rubrics-Checked \
-    --eval-yaml /path/to/Workspace-Bench/evaluation/runs/Eval--cc-Seed-2.0-Lite.yaml \
-    --parallel \
-    --workers 3
-
-/home/tangzirui/miniconda3/bin/python src/agent_as_a_judge.py \
-    --task-dir /path/to/Workspace-Bench/evaluation/output/ClaudeCode--Seed-2.0-Lite--Test-Rubrics-Checked \
-    --eval-yaml /path/to/Workspace-Bench/evaluation/runs/Eval--cc-Seed-2.0-Lite.yaml \
-    --parallel \
-    --workers 3
-
-/home/tangzirui/miniconda3/bin/python src/agent_as_a_judge.py \
-    --task-dir /path/to/Workspace-Bench/evaluation/output/ClaudeCode--Kimi-2.5--Test-Rubrics-Checked \
-    --eval-yaml /path/to/Workspace-Bench/evaluation/runs/Eval--cc-Seed-1.8.yaml \
-    --parallel
-
-/home/tangzirui/miniconda3/bin/python src/agent_as_a_judge.py \
-    --task-dir /path/to/Workspace-Bench/evaluation/output/ClaudeCode--MiniMax-M2.7--Test-Rubrics-Checked \
-    --eval-yaml /path/to/Workspace-Bench/evaluation/runs/Eval--cc-Seed-1.8.yaml \
-    --parallel
-
-/home/tangzirui/miniconda3/bin/python src/agent_as_a_judge.py \
-    --task-dir /path/to/Workspace-Bench/evaluation/output/ClaudeCode--Seed-2.0-Lite--Test-Rubrics-Checked \
-    --eval-yaml /path/to/Workspace-Bench/evaluation/runs/Eval--cc-Seed-1.8.yaml \
-    --parallel
-
-
-
-/home/tangzirui/miniconda3/bin/python src/agent_as_a_judge.py \
-    --task-dir /path/to/Workspace-Bench/evaluation/output/DeepAgent--GLM-5.1--Test-Rubrics-Checked \
-    --eval-yaml /path/to/Workspace-Bench/evaluation/runs/Eval--cc-Seed-2.0-Lite.yaml \
-    --parallel
-
-/home/tangzirui/miniconda3/bin/python src/agent_as_a_judge.py \
-    --task-dir /path/to/Workspace-Bench/evaluation/output/DeepAgent--Seed-2.0-Lite--Test-Rubrics-Checked \
-    --eval-yaml /path/to/Workspace-Bench/evaluation/runs/Eval--cc-Seed-2.0-Lite.yaml \
-    --parallel
-
-/home/tangzirui/miniconda3/bin/python src/agent_as_a_judge.py \
-    --task-dir /path/to/Workspace-Bench/evaluation/output/DeepAgent--MiniMax-M2.7--Test-Rubrics-Checked \
-    --eval-yaml /path/to/Workspace-Bench/evaluation/runs/Eval--cc-Seed-2.0-Lite.yaml \
-    --parallel
-
-/home/tangzirui/miniconda3/bin/python src/agent_as_a_judge.py \
-    --task-dir /path/to/Workspace-Bench/evaluation/output/DeepAgent--Kimi-2.5--Test-Rubrics-Checked \
-    --eval-yaml /path/to/Workspace-Bench/evaluation/runs/Eval--cc-Seed-2.0-Lite.yaml \
-    --parallel
-
-/home/tangzirui/miniconda3/bin/python src/agent_as_a_judge.py \
-    --task-dir /path/to/Workspace-Bench/evaluation/output/OpenClaw--Seed-2.0-Lite--Test-Rubrics-Checked \
-    --eval-yaml /path/to/Workspace-Bench/evaluation/runs/Eval--cc-Seed-2.0-Lite.yaml \
-    --parallel
-
-
 """

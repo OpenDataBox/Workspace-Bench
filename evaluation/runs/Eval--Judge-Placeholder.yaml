@@ -1,4 +1,0 @@
-model_name: Judge-Placeholder
-baseUrl: "${JUDGE_BASE_URL}"
-model: "${JUDGE_MODEL}"
-apiKey: "${JUDGE_API_KEY:-${MINIMAXM27_API_KEY}}"

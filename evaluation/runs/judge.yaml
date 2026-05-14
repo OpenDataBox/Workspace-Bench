@@ -1,0 +1,4 @@
+model_name: "${JUDGE_MODEL}"
+baseUrl: "${JUDGE_BASE_URL}"
+model: "${JUDGE_MODEL}"
+apiKey: "${JUDGE_API_KEY}"

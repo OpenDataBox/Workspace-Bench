@@ -101,10 +101,17 @@ def _write_json(path: Path, data: Json) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _clear_generated_files(path: Path, pattern: str) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    for child in path.glob(pattern):
+        if child.is_file() or child.is_symlink():
+            child.unlink()
+
+
 def _generate_runs(eval_root: Path, dst_runs: Path) -> None:
     src_runs = eval_root / "runs"
     dst_fs_map_root = eval_root / ".generated" / "docker" / "fs_map"
-    dst_runs.mkdir(parents=True, exist_ok=True)
+    _clear_generated_files(dst_runs, "*.yaml")
     for src in sorted(src_runs.glob("*.yaml")):
         data = yaml.safe_load(src.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
@@ -113,14 +120,14 @@ def _generate_runs(eval_root: Path, dst_runs: Path) -> None:
         fs_map_file = data.get("fs_map_file")
         if isinstance(fs_map_file, str) and fs_map_file.strip():
             data["fs_map_file"] = str(dst_fs_map_root / Path(fs_map_file).name)
-        if data.get("eval_while_running") is True and str(src.name).endswith("--DockerSmoke.yaml"):
+        if data.get("eval_while_running") is True and data.get("run_name") == "Smoke":
             data["eval_while_running"] = False
         _write_yaml(dst_runs / src.name, data)
 
 
 def _generate_fs_maps(eval_root: Path, dst_fs_maps: Path, ensure_workdirs: bool) -> None:
     src_fs_maps = eval_root / "fs_map"
-    dst_fs_maps.mkdir(parents=True, exist_ok=True)
+    _clear_generated_files(dst_fs_maps, "*.json")
     for src in sorted(src_fs_maps.glob("*.json")):
         obj = json.loads(src.read_text(encoding="utf-8"))
         obj = _normalize_fs_map(obj, eval_root)

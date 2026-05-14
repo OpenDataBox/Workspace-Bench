@@ -82,32 +82,107 @@ Workspace-Bench contains:
 
 ## 🚀 Quick Start
 
-The runnable harness lives in `evaluation/`. Docker execution uses host
-networking by default and mounts this repository at
-`/workspace/Workspace-Bench` inside the container.
+Follow these steps to download Workspace-Bench-Lite and run a one-task smoke
+evaluation.
+
+### Prerequisites
+
+- Docker
+- Python 3
+- API credentials for the agent you want to run
 
 ```bash
 cd evaluation
 cp .env.example .env
-docker compose -f docker/docker-compose.yaml build
-docker compose -f docker/docker-compose.yaml run --rm workspace-bench bash /workspace/Workspace-Bench/evaluation/docker/bootstrap.sh
-docker compose -f docker/docker-compose.yaml run --rm workspace-bench bash /workspace/Workspace-Bench/evaluation/docker/run-smoke.sh
 ```
 
-The Git repository contains harness code, run configs, task definitions, and
-the dashboard. Task data and large workspace filesystem assets are distributed
-through Hugging Face and should not be committed to Git:
+Fill `.env` before running an evaluation. For the default smoke command below,
+set `KIMIK25_BASE_URL` and `KIMIK25_API_KEY`, or set the fallback
+`CODEX_BASE_URL` and `CODEX_API_KEY`.
 
-- Lite tasks: https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench-Lite
-- Full tasks: https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench
-- Workspaces: https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench-Workspaces
+### Download Data
 
-Download assets as needed:
+Download the Lite task set and workspace files:
 
 ```bash
-cd evaluation
 python3 scripts/download_hf_assets.py --lite --workspaces
 ```
+
+### Build Environment
+
+```bash
+docker compose -f docker/docker-compose.yaml build
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
+  bash /workspace/Workspace-Bench/evaluation/docker/bootstrap.sh
+```
+
+### Run One Task
+
+Run a single-task smoke evaluation with Codex:
+
+```bash
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
+  bash /workspace/Workspace-Bench/evaluation/docker/run-benchmark.sh \
+  --harness codex \
+  --model kimi-k2.5 \
+  --dataset smoke
+```
+
+Check the report:
+
+```bash
+python3 scripts/assert_agent_runner_report.py \
+  output/Codex--Kimi-K2.5--Smoke/agent_runner_report.json
+```
+
+The expected output is:
+
+```text
+[ok] output/Codex--Kimi-K2.5--Smoke/agent_runner_report.json: 1/1 passed
+```
+
+Task outputs and logs are written to:
+
+```text
+evaluation/output/Codex--Kimi-K2.5--Smoke/
+```
+
+### Run the Full Benchmark
+
+Download the full task set and rebuild workspaces:
+
+```bash
+python3 scripts/download_hf_assets.py --full
+```
+
+Then run a full configuration:
+
+```bash
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
+  bash /workspace/Workspace-Bench/evaluation/docker/run-benchmark.sh \
+  --harness codex \
+  --model kimi-k2.5 \
+  --dataset full
+```
+
+### Other Run Configs
+
+You can change the harness, model, and dataset split from the command line:
+
+```bash
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
+  bash /workspace/Workspace-Bench/evaluation/docker/run-benchmark.sh \
+  --harness openclaw \
+  --model glm-5.1 \
+  --dataset lite
+```
+
+Supported harness values are `codex`, `openclaw`, `deepagent`, and
+`claudecode`. Common model aliases include `gpt-5.4`, `gemini-3.1-pro`,
+`kimi-k2.5`, `glm-5.1`, `minimax-m2.7`, `grok-4.3`, and `qwen-3.6`.
+For a custom provider model, add `--model-id`, `--model-name`, and
+`--env-prefix`.
+Completed run outputs are stored under `evaluation/output/`.
 
 ## 🔎 Publications
 - [Workspace-Bench 1.0: Benchmarking AI Agents on Workspace Tasks with Large-Scale File Dependencies](https://arxiv.org/abs/2605.03596)
