@@ -17,7 +17,6 @@ DEEPAGENTS_ROOT = os.path.abspath(
     os.environ.get("DEEPAGENTS_ROOT")
     or os.path.join(os.environ.get("WORKSPACE_BENCH_ROOT") or os.environ.get("RIP_BENCH_ROOT") or _default_rip_bench_root(), "deepagents")
 )
-DEEPAGENTS_CLI_PROJECT = os.path.join(DEEPAGENTS_ROOT, "libs", "cli")
 DEEPAGENTS_LIB_PROJECT = os.path.join(DEEPAGENTS_ROOT, "libs", "deepagents")
 
 
@@ -402,11 +401,11 @@ def run(
     raw_dir = os.path.join(sandbox_dir, "raw")
     _ensure_dir(raw_dir)
 
-    if not os.path.isdir(DEEPAGENTS_CLI_PROJECT) or not os.path.isdir(DEEPAGENTS_LIB_PROJECT):
+    if not os.path.isdir(DEEPAGENTS_LIB_PROJECT):
         return {
             "status": "error",
             "paths": [],
-            "errorMessage": f"Missing deepagents projects: {DEEPAGENTS_CLI_PROJECT} / {DEEPAGENTS_LIB_PROJECT}",
+            "errorMessage": f"Missing deepagents project: {DEEPAGENTS_LIB_PROJECT}",
         }
 
     base_url = _normalize_base_url(api_provider.get("baseUrl") if isinstance(api_provider, dict) else None)
@@ -442,9 +441,9 @@ def run(
         "uv",
         "run",
         "--project",
-        DEEPAGENTS_CLI_PROJECT,
-        "--with",
         DEEPAGENTS_LIB_PROJECT,
+        "--with",
+        "langchain-openai>=1.1.12,<2.0.0",
         "python",
         script_path,
         input_path,
