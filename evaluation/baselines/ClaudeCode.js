@@ -260,9 +260,10 @@ async function _runTaskImpl(task, opts, startedAt, startMs) {
         pathToClaudeCodeExecutable: getClaudeCodePath(),
         permissionMode: 'default',
         includePartialMessages: true,
-        canUseTool: async (toolName, input) => {
+        canUseTool: async (toolName, input, permissionOptions = {}) => {
           const tool = String(toolName || '');
           const inp = (input && typeof input === 'object') ? input : {};
+          const toolUseID = typeof permissionOptions.toolUseID === 'string' ? permissionOptions.toolUseID : undefined;
 
           const fp = typeof inp.file_path === 'string' ? inp.file_path : null;
           const p = typeof inp.path === 'string' ? inp.path : null;
@@ -272,15 +273,23 @@ async function _runTaskImpl(task, opts, startedAt, startMs) {
           const isFileTool = ['Read', 'Write', 'Edit', 'NotebookEdit', 'Glob', 'Grep', 'LS', 'DeleteFile'].includes(tool);
           if (isFileTool && pathToCheck !== null && !isUnderCwd(pathToCheck)) {
             log(`${c.red}[deny]${c.reset} ${tool} ${pathToCheck}`);
-            return { behavior: 'deny', updatedInput: inp };
+            return {
+              behavior: 'deny',
+              message: `${tool} is not allowed outside the task working directory: ${pathToCheck}`,
+              toolUseID,
+            };
           }
           if (tool === 'Bash' && cmd !== null && !commandLooksSafe(cmd)) {
             log(`${c.red}[deny]${c.reset} Bash`);
-            return { behavior: 'deny', updatedInput: inp };
+            return {
+              behavior: 'deny',
+              message: `Bash command is not allowed because it references paths outside the task working directory.`,
+              toolUseID,
+            };
           }
 
           log(`${c.blue}[approve]${c.reset} ${tool}`);
-          return { behavior: 'allow', updatedInput: inp };
+          return { behavior: 'allow', updatedInput: inp, toolUseID };
         },
       },
     });
