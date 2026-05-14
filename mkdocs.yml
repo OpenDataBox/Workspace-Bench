@@ -50,12 +50,13 @@ markdown_extensions:
       permalink: true
 
 nav:
-  - Home: index.md
-  - Quick Start: quickstart.md
-  - Dataset: dataset.md
-  - Evaluation: evaluation.md
-  - Visualization: visualization.md
-  - Troubleshooting: troubleshooting.md
+  - Workspace-Bench: index.md
+  - User Guides:
+    - Quick Start: quickstart.md
+    - Dataset: dataset.md
+    - Evaluation: evaluation.md
+    - Visualization: visualization.md
+  - Leaderboard: https://workspace-bench.github.io/leaderboard.html
 
 extra:
   social:

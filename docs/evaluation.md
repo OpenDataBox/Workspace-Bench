@@ -160,4 +160,3 @@ python3 src/agent_runner.py --run-config runs/my_config.yaml
 ## Next Steps
 
 - [Visualization](visualization.md) — Browse results in the web dashboard
-- [Troubleshooting](troubleshooting.md) — Common issues and solutions
