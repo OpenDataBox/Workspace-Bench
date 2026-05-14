@@ -20,6 +20,9 @@
   <a href="https://arxiv.org/abs/2605.03596">
     <img alt="arXiv Paper" src="https://img.shields.io/badge/arXiv-2605.03596-b31b1b?logo=arxiv&logoColor=white" />
   </a>
+  <a href="https://opendatabox.github.io/Workspace-Bench/">
+    <img alt="Documentation" src="https://img.shields.io/badge/Docs-MkDocs-4c6ef5?logo=readthedocs&logoColor=white" />
+  </a>
 </div>
 
 <!-- <div align="center">

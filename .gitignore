@@ -50,3 +50,4 @@ evaluation/filesys/*.zip
 # Viz artifacts
 viz/.env
 viz/dist/
+site/
