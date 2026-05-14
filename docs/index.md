@@ -1,5 +1,9 @@
 # Workspace-Bench
 
+<div align="center">
+  <img src="assets/brand.svg" alt="Workspace-Bench Brand" width="480" />
+</div>
+
 Workspace-Bench is a benchmark for evaluating AI agents on **workspace tasks with large-scale file dependencies**. It is built to study a capability we call **Workspace Learning**: whether an agent can identify, reason over, exploit, and update explicit and implicit dependencies among heterogeneous files in a real worker's workspace.
 
 Unlike benchmarks that place all information directly in the prompt or provide a small bundle of task-specific files, Workspace-Bench evaluates agents in realistic workspaces where they must independently explore directories, locate relevant evidence, understand cross-file relations, and produce correct deliverables.
