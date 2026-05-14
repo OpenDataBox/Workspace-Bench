@@ -4,6 +4,7 @@ import csv
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Dict
 
@@ -12,6 +13,22 @@ DATASETS = {
     "lite": ("Workspace-Bench/Workspace-Bench-Lite", "tasks_lite"),
     "full": ("Workspace-Bench/Workspace-Bench", "tasks"),
     "workspaces": ("Workspace-Bench/Workspace-Bench-Workspaces", "filesys"),
+}
+
+WORKSPACE_ARCHIVE = "filesys_en_workdirs.zip"
+WORKSPACE_RAW_DIRS = (
+    "chanpin_raw",
+    "kaifa_raw",
+    "research_raw",
+    "yunying_raw",
+    "houqin_raw",
+)
+WORKSPACE_EXTRACTED_DIR_MAP = {
+    "ProductManager_Workdir": "chanpin_raw",
+    "BackendDeveloper_Workdir": "kaifa_raw",
+    "Research_Workdir": "research_raw",
+    "OperationsManager_Workdir": "yunying_raw",
+    "LogisticsManager_Workdir": "houqin_raw",
 }
 
 PERSONA_TO_FILE_SYSTEM = {
@@ -57,10 +74,7 @@ def _materialize_csv(csv_path: Path, dst: Path) -> int:
                 parsed = _load_jsonish(value)
                 if parsed not in ("", None):
                     meta[key] = parsed
-            meta.setdefault("id", task_id)
-            meta.setdefault("file_system", PERSONA_TO_FILE_SYSTEM.get(persona, persona))
-            meta.setdefault("job", persona)
-            meta.setdefault("user_profit", meta["file_system"])
+            _normalize_task_meta(meta, task_id=task_id)
             if "output_files" not in meta and "output_file" in meta:
                 meta["output_files"] = [meta["output_file"]]
 
@@ -74,8 +88,57 @@ def _materialize_csv(csv_path: Path, dst: Path) -> int:
     return count
 
 
+def _normalize_task_meta(meta: Dict[str, Any], task_id: str | None = None) -> Dict[str, Any]:
+    if task_id:
+        meta.setdefault("id", task_id)
+    elif not meta.get("id"):
+        absolute_id = str(meta.get("absolute_id") or "").strip()
+        if absolute_id:
+            meta["id"] = absolute_id
+
+    persona = str(meta.get("persona") or meta.get("job") or "").strip()
+    file_system = str(meta.get("file_system") or "").strip()
+    normalized_fs = PERSONA_TO_FILE_SYSTEM.get(persona) or PERSONA_TO_FILE_SYSTEM.get(file_system) or file_system
+    if normalized_fs:
+        meta["file_system"] = normalized_fs
+        meta.setdefault("user_profit", normalized_fs)
+    if persona:
+        meta.setdefault("job", persona)
+    return meta
+
+
+def _normalize_task_metadata_files(dst: Path) -> int:
+    count = 0
+    for meta_path in sorted(dst.glob("*/metadata.json")):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(meta, dict):
+            continue
+        before = json.dumps(meta, ensure_ascii=False, sort_keys=True)
+        _normalize_task_meta(meta, task_id=meta_path.parent.name)
+        after = json.dumps(meta, ensure_ascii=False, sort_keys=True)
+        if after != before:
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        count += 1
+    return count
+
+
 def _has_metadata_dirs(path: Path) -> bool:
     return any(path.glob("*/metadata.json"))
+
+
+def _find_metadata_root(path: Path) -> Path | None:
+    if _has_metadata_dirs(path):
+        return path
+    for metadata_path in sorted(path.rglob("metadata.json")):
+        parent = metadata_path.parent
+        if parent.parent == path:
+            return path
+        if _has_metadata_dirs(parent.parent):
+            return parent.parent
+    return None
 
 
 def _find_csv(path: Path) -> Path | None:
@@ -101,6 +164,104 @@ def _snapshot_download(repo_id: str, dst: Path, revision: str | None) -> Path:
     )
 
 
+def _hf_dataset_url(repo_id: str, filename: str, revision: str | None) -> str:
+    try:
+        from huggingface_hub import hf_hub_url
+    except ImportError as exc:
+        raise SystemExit("Please install huggingface_hub first: pip install huggingface_hub") from exc
+
+    return hf_hub_url(
+        repo_id=repo_id,
+        filename=filename,
+        repo_type="dataset",
+        revision=revision,
+    )
+
+
+def _require_command(name: str) -> None:
+    if shutil.which(name) is None:
+        raise SystemExit(f"Required command not found: {name}")
+
+
+def _download_with_wget(url: str, archive_path: Path, force: bool) -> None:
+    _require_command("wget")
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    if force and archive_path.exists():
+        archive_path.unlink()
+    subprocess.run(
+        [
+            "wget",
+            "-c",
+            "--progress=dot:giga",
+            "-O",
+            str(archive_path),
+            url,
+        ],
+        check=True,
+    )
+
+
+def _workspace_dirs_exist(dst: Path) -> bool:
+    return all((dst / name).is_dir() for name in WORKSPACE_RAW_DIRS)
+
+
+def _normalize_workspace_layout(dst: Path, force: bool) -> bool:
+    if _workspace_dirs_exist(dst) and not force:
+        return True
+
+    extracted_roots = [dst, dst / "filesys_en"]
+    moved_any = False
+    for src_name, dst_name in WORKSPACE_EXTRACTED_DIR_MAP.items():
+        target = dst / dst_name
+        if target.exists() and force:
+            shutil.rmtree(target) if target.is_dir() else target.unlink()
+        if target.exists():
+            continue
+        for extracted_root in extracted_roots:
+            source = extracted_root / src_name
+            if source.is_dir():
+                shutil.move(str(source), str(target))
+                moved_any = True
+                break
+
+    nested_root = dst / "filesys_en"
+    if nested_root.is_dir() and not any(nested_root.iterdir()):
+        nested_root.rmdir()
+
+    if moved_any:
+        print(f"[ok] normalized workspace directory names under {dst}")
+    return _workspace_dirs_exist(dst)
+
+
+def _extract_workspace_archive(archive_path: Path, dst: Path, force: bool) -> None:
+    _require_command("unzip")
+    if not archive_path.exists():
+        raise SystemExit(f"workspace archive not found: {archive_path}")
+    if _normalize_workspace_layout(dst, force=False) and not force:
+        print(f"[ok] workspace filesystems already extracted under {dst}")
+        return
+    for name in WORKSPACE_RAW_DIRS:
+        target = dst / name
+        if target.exists():
+            shutil.rmtree(target) if target.is_dir() else target.unlink()
+    subprocess.run(
+        [
+            "unzip",
+            "-q",
+            "-o",
+            str(archive_path),
+            "-d",
+            str(dst),
+        ],
+        check=True,
+    )
+    if not _normalize_workspace_layout(dst, force=force):
+        raise SystemExit(
+            "workspace archive extracted, but expected raw workspace directories "
+            f"were not found under {dst}"
+        )
+
+
 def download_tasks(kind: str, eval_root: Path, revision: str | None, force: bool) -> None:
     repo_id, dirname = DATASETS[kind]
     dst = eval_root / dirname
@@ -110,8 +271,9 @@ def download_tasks(kind: str, eval_root: Path, revision: str | None, force: bool
     dst.mkdir(parents=True, exist_ok=True)
     snapshot = _snapshot_download(repo_id, tmp, revision)
 
-    if _has_metadata_dirs(snapshot):
-        for child in snapshot.iterdir():
+    metadata_root = _find_metadata_root(snapshot)
+    if metadata_root is not None:
+        for child in metadata_root.iterdir():
             if child.name.startswith("."):
                 continue
             target = dst / child.name
@@ -124,7 +286,8 @@ def download_tasks(kind: str, eval_root: Path, revision: str | None, force: bool
                 shutil.copytree(child, target)
             else:
                 shutil.copy2(child, target)
-        print(f"[ok] downloaded {kind} task directories to {dst}")
+        count = _normalize_task_metadata_files(dst)
+        print(f"[ok] downloaded {count} {kind} task directories to {dst}")
         return
 
     csv_path = _find_csv(snapshot)
@@ -137,10 +300,16 @@ def download_tasks(kind: str, eval_root: Path, revision: str | None, force: bool
 def download_workspaces(eval_root: Path, revision: str | None, force: bool) -> None:
     repo_id, dirname = DATASETS["workspaces"]
     dst = eval_root / dirname
-    if force and dst.exists():
-        shutil.rmtree(dst)
-    _snapshot_download(repo_id, dst, revision)
-    print(f"[ok] downloaded workspace filesystems to {dst}")
+    archive_path = dst / WORKSPACE_ARCHIVE
+    if _normalize_workspace_layout(dst, force=False) and not force:
+        print(f"[ok] workspace filesystems already exist under {dst}")
+        return
+    dst.mkdir(parents=True, exist_ok=True)
+    url = _hf_dataset_url(repo_id, WORKSPACE_ARCHIVE, revision)
+    _download_with_wget(url, archive_path, force)
+    print(f"[ok] downloaded workspace archive to {archive_path}")
+    _extract_workspace_archive(archive_path, dst, force)
+    print(f"[ok] extracted workspace filesystems to {dst}")
 
 
 def main() -> None:

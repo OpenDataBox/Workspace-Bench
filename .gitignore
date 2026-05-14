@@ -43,6 +43,9 @@ evaluation/*.pid
 evaluation/filesys/*_workdir*/
 evaluation/filesys/*_raw/
 evaluation/filesys/*_standard/
+evaluation/filesys/.cache/
+evaluation/filesys/.gitattributes
+evaluation/filesys/*.zip
 
 # Viz artifacts
 viz/.env
