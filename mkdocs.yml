@@ -7,6 +7,10 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
+  favicon: assets/Workspace.svg
+  logo: assets/Workspace.svg
+  icon:
+    repo: fontawesome/brands/github
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -57,6 +61,9 @@ nav:
     - Evaluation: evaluation.md
     - Visualization: visualization.md
   - Leaderboard: https://workspace-bench.github.io/leaderboard.html
+
+extra_css:
+  - stylesheets/extra.css
 
 extra:
   social:
