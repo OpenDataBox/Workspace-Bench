@@ -97,8 +97,7 @@ cp .env.example .env
 ```
 
 Fill `.env` before running an evaluation. For the default smoke command below,
-set `KIMIK25_BASE_URL` and `KIMIK25_API_KEY`, or set the fallback
-`CODEX_BASE_URL` and `CODEX_API_KEY`.
+set `KIMIK25_BASE_URL` and `KIMIK25_API_KEY`.
 
 ### Download Data
 
@@ -147,22 +146,16 @@ Task outputs and logs are written to:
 evaluation/output/Codex--Kimi-K2.5--Smoke/
 ```
 
-### Run the Full Benchmark
+### Run Workspace-Bench-Lite
 
-Download the full task set and rebuild workspaces:
-
-```bash
-python3 scripts/download_hf_assets.py --full
-```
-
-Then run a full configuration:
+Run the 100-task Lite benchmark:
 
 ```bash
 docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
   bash /workspace/Workspace-Bench/evaluation/docker/run-benchmark.sh \
   --harness codex \
   --model kimi-k2.5 \
-  --dataset full
+  --dataset lite
 ```
 
 ### Other Run Configs
@@ -180,9 +173,41 @@ docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
 Supported harness values are `codex`, `openclaw`, `deepagent`, and
 `claudecode`. Common model aliases include `gpt-5.4`, `gemini-3.1-pro`,
 `kimi-k2.5`, `glm-5.1`, `minimax-m2.7`, `grok-4.3`, and `qwen-3.6`.
+When using `claudecode`, the selected model endpoint must be compatible with
+the Anthropic API.
 For a custom provider model, add `--model-id`, `--model-name`, and
 `--env-prefix`.
 Completed run outputs are stored under `evaluation/output/`.
+
+### Run the Full Benchmark
+
+Download the full task set:
+
+```bash
+python3 scripts/download_hf_assets.py --full
+```
+
+Then run the full benchmark:
+
+```bash
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
+  bash /workspace/Workspace-Bench/evaluation/docker/run-benchmark.sh \
+  --harness codex \
+  --model kimi-k2.5 \
+  --dataset full
+```
+
+### Visualize Results
+
+To browse runs and rubric judgments in the web dashboard (requires Node.js):
+
+```bash
+cd viz
+npm install
+npm run dev
+```
+
+The dashboard will be available at `http://localhost:5173` and automatically discovers results under `evaluation/output/`.
 
 ## 🔎 Publications
 - [Workspace-Bench 1.0: Benchmarking AI Agents on Workspace Tasks with Large-Scale File Dependencies](https://arxiv.org/abs/2605.03596)

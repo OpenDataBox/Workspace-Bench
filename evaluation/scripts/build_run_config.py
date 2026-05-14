@@ -77,13 +77,13 @@ def _provider_config(harness: str, provider_type: str, env_prefix: str, llm_mode
             "provider_type": "anthropic",
             "baseUrl": f"${{{env_prefix}_ANTHROPIC_BASE_URL:-${{{env_prefix}_BASE_URL}}}}",
             "model": f"${{{env_prefix}_ANTHROPIC_MODEL:-{llm_model}}}",
-            "apiKey": f"${{{env_prefix}_API_KEY:-${{CODEX_API_KEY}}}}",
+            "apiKey": f"${{{env_prefix}_API_KEY}}",
         }
     return {
         "provider_type": provider_type,
-        "baseUrl": f"${{{env_prefix}_BASE_URL:-${{CODEX_BASE_URL}}}}",
+        "baseUrl": f"${{{env_prefix}_BASE_URL}}",
         "model": llm_model,
-        "apiKey": f"${{{env_prefix}_API_KEY:-${{CODEX_API_KEY}}}}",
+        "apiKey": f"${{{env_prefix}_API_KEY}}",
     }
 
 
