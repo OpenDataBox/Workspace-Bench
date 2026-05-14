@@ -1,0 +1,23 @@
+{
+    "raw_work_dir": {
+        "产品人员": "filesys/chanpin_raw",
+        "开发人员": "filesys/kaifa_raw",
+        "研究人员": "filesys/research_raw",
+        "运营人员": "filesys/yunying_raw",
+        "行政/后勤人员": "filesys/houqin_raw"
+    },
+    "standard_work_dir": {
+        "产品人员": "filesys/chanpin_standard",
+        "开发人员": "filesys/kaifa_standard",
+        "研究人员": "filesys/research_standard",
+        "运营人员": "filesys/yunying_standard",
+        "行政/后勤人员": "filesys/houqin_standard"
+    },
+    "work_dir": {
+        "产品人员": "filesys/chanpin_workdir_Codex_Kimi-K2.5",
+        "开发人员": "filesys/kaifa_workdir_Codex_Kimi-K2.5",
+        "研究人员": "filesys/research_workdir_Codex_Kimi-K2.5",
+        "运营人员": "filesys/yunying_workdir_Codex_Kimi-K2.5",
+        "行政/后勤人员": "filesys/houqin_workdir_Codex_Kimi-K2.5"
+    }
+}

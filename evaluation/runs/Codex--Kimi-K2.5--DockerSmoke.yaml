@@ -1,0 +1,23 @@
+agent_name: Codex
+model_name: Kimi-K2.5
+run_name: DockerSmoke
+
+task_path: ${WORKSPACE_BENCH_EVAL_ROOT}/tasks_lite
+output_dir: ${WORKSPACE_BENCH_EVAL_ROOT}/output
+fs_map_file: fs_map/fs_map_Codex_Kimi-K2.5.json
+
+prompt_head:
+prompt_tail: 【Note】这个任务你需要把结果输出到文件并保存到工作目录中特定的位置中。在完成任务后，你需要将最后输出的文件路径以列表的方式进行提供，你给出的路径将会是基于工作路径的，例如 ['model_output/a.xlsx', 'model_output/b.docx']
+
+task_limit: 1
+timeout_sec: 2000.0
+task_target_output_dir: "model_output"
+
+eval_while_running: false
+eval_yaml: runs/Eval--Judge-Placeholder.yaml
+
+api_provider:
+  provider_type: openai
+  baseUrl: "${KIMIK25_BASE_URL:-${CODEX_BASE_URL}}"
+  model: kimi-k2.5
+  apiKey: "${KIMIK25_API_KEY:-${CODEX_API_KEY}}"

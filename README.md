@@ -82,10 +82,32 @@ Workspace-Bench contains:
 
 ## 🚀 Quick Start
 
-**Coming soon.**
+The runnable harness lives in `evaluation/`. Docker execution uses host
+networking by default and mounts this repository at
+`/workspace/Workspace-Bench` inside the container.
 
-We will release the dataset, evaluation pipeline, and example usage instructions for running agents on Workspace-Bench and Workspace-Bench-Lite.
-The public release will include the necessary task assets, output specifications, and benchmarking scripts.
+```bash
+cd evaluation
+cp .env.example .env
+docker compose -f docker/docker-compose.yaml build
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench bash /workspace/Workspace-Bench/evaluation/docker/bootstrap.sh
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench bash /workspace/Workspace-Bench/evaluation/docker/run-smoke.sh
+```
+
+The Git repository contains harness code, run configs, task definitions, and
+the dashboard. Task data and large workspace filesystem assets are distributed
+through Hugging Face and should not be committed to Git:
+
+- Lite tasks: https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench-Lite
+- Full tasks: https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench
+- Workspaces: https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench-Workspaces
+
+Download assets as needed:
+
+```bash
+cd evaluation
+python3 scripts/download_hf_assets.py --lite --workspaces
+```
 
 ## 🔎 Publications
 - [Workspace-Bench 1.0: Benchmarking AI Agents on Workspace Tasks with Large-Scale File Dependencies](https://arxiv.org/abs/2605.03596)

@@ -1,0 +1,31 @@
+agent_name: OpenClaw
+model_name: Kimi-2.5
+run_name: Test-Rubrics-Checked
+
+task_path: ${WORKSPACE_BENCH_EVAL_ROOT}/tasks
+output_dir: ${WORKSPACE_BENCH_EVAL_ROOT}/output
+fs_map_file: fs_map/fs_map_OpenClaw_Kimi.json
+
+prompt_head: 注意，当前你访问的文件系统绝对路径以/home开头的话是一个软链接，你如果你要以/home开头访问内容，你需要使用/data00/home开头作为访问路径。
+prompt_tail: 【Note】这个任务你需要把结果输出到文件并保存到工作目录中特定的位置中。在完成任务后，你需要将最后输出的文件路径以列表的方式进行提供，你给出的路径将会是基于工作路径的，例如 ['/xxx/yyy/a.xlsx', '/xxx/yyy/b.docx']
+
+# task_limit: 100
+timeout_sec: 2000.0
+task_target_output_dir: "model_output"
+
+eval_while_running: false
+eval_yaml: runs/Eval--cc-Seed-2.0-Lite.yaml
+
+workdir_parallel: true
+
+# api_provider:
+#   provider_type: openai
+#   baseUrl: https://openrouter.ai/api/v1
+#   model: moonshotai/kimi-k2.5
+
+api_provider:
+  provider_type: openai
+  baseUrl: "${KIMI25_BASE_URL}"
+  model: "${KIMI25_MODEL:-kimi-k2-0905-preview}"
+  apiKey: "${KIMI25_API_KEY:-${CODEX_API_KEY}}"
+

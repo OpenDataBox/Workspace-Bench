@@ -1,0 +1,25 @@
+agent_name: OpenClaw  # 用什么Harness运行 OpenClaw / ClaudeCode / DeepAgent
+model_name: Seed-2.0-Pro  # 使用的模型名称 
+run_name: Test-Rubrics-Checked  # 这一次运行的名称
+
+task_path: ${WORKSPACE_BENCH_EVAL_ROOT}/tasks # 任务文件所在路径
+output_dir: ${WORKSPACE_BENCH_EVAL_ROOT}/output # 指定输出文件所在路径
+fs_map_file: fs_map/fs_map_OpenClaw.json  # 文件映射文件路径
+
+# 提示头，额外的提示词
+prompt_head: 注意，当前你访问的文件系统绝对路径以/home开头的话是一个软链接，你如果你要以/home开头访问内容，你需要使用/data00/home开头作为访问路径。
+# 提示尾，额外的提示词
+prompt_tail: 【Note】这个任务你需要把结果输出到文件并保存到工作目录中特定的位置中。在完成任务后，你需要将最后输出的文件路径以列表的方式进行提供，你给出的路径将会是基于工作路径的，例如 ['/xxx/yyy/a.xlsx', '/xxx/yyy/b.docx']
+
+# task_limit: 100  # 任务数限制
+timeout_sec: 2000.0  # 超时时间，单位秒，默认1000秒
+task_target_output_dir: "model_output"  # 模型输出文件所在路径 不用改
+
+eval_while_running: false  # 是否在模型运行时评估，默认false
+eval_yaml: runs/Eval--cc-MiniMax-M2.7.yaml  # 评估文件路径，即指定了用什么模型进行Agent-as-a-Judge评估
+
+api_provider:
+  provider_type: openai  # API提供者类型，openai 或 anthropic
+  baseUrl:  # API提供者的URL
+  model:   # 模型名称
+  apiKey: "${API_KEY}"
