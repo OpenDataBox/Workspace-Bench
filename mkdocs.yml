@@ -1,0 +1,71 @@
+site_name: Workspace-Bench
+site_description: Benchmarking AI Agents on Workspace Tasks with Large-Scale File Dependencies
+site_url: https://opendatabox.github.io/Workspace-Bench/
+repo_url: https://github.com/OpenDataBox/Workspace-Bench
+repo_name: OpenDataBox/Workspace-Bench
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  favicon: assets/Workspace.svg
+  logo: assets/Workspace.svg
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+plugins:
+  - search
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Workspace-Bench: index.md
+  - User Guides:
+    - Quick Start: quickstart.md
+    - Dataset: dataset.md
+    - Evaluation: evaluation.md
+    - Visualization: visualization.md
+  - Leaderboard: https://workspace-bench.github.io/leaderboard.html
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/OpenDataBox/Workspace-Bench

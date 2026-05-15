@@ -1,0 +1,53 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Local credentials
+.env
+*.env
+!.env.example
+
+# Agent/runtime state
+.agents/
+.codex/
+.openclaw/
+.claude/
+**/.claude/
+**/.claude.json
+**/Library/Caches/
+**/.matplotlib/
+
+# Python/Node dependency installs
+.venv/
+*/.venv/
+node_modules/
+*/node_modules/
+dist/
+build/
+
+# Evaluation outputs and generated configs
+evaluation/.generated/
+evaluation/logs/
+evaluation/output/
+evaluation/packages/
+evaluation/tasks/
+evaluation/tasks_lite/
+!evaluation/tasks/README.md
+!evaluation/tasks_lite/README.md
+evaluation/tmp/
+evaluation/tmp_tasks/
+evaluation/*.log
+evaluation/*.pid
+
+# Mutable workspace copies and externally distributed workspace data
+evaluation/filesys/*_workdir*/
+evaluation/filesys/*_raw/
+evaluation/filesys/*_standard/
+evaluation/filesys/.cache/
+evaluation/filesys/.gitattributes
+evaluation/filesys/*.zip
+
+# Viz artifacts
+viz/.env
+viz/dist/
+site/

@@ -1,0 +1,33 @@
+services:
+  workspace-bench:
+    build:
+      context: ../..
+      dockerfile: evaluation/docker/Dockerfile
+      network: host
+    image: workspace-bench:local
+    network_mode: host
+    working_dir: /workspace/Workspace-Bench/evaluation
+    tty: true
+    stdin_open: true
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      WORKSPACE_BENCH_ROOT: /workspace/Workspace-Bench
+      WORKSPACE_BENCH_EVAL_ROOT: /workspace/Workspace-Bench/evaluation
+      RIP_BENCH_ROOT: /workspace/Workspace-Bench
+      RIP_BENCH_EVAL_ROOT: /workspace/Workspace-Bench/evaluation
+      DEEPAGENTS_ROOT: /workspace/Workspace-Bench/deepagents
+      CODEX_SANDBOX_MODE: danger-full-access
+    volumes:
+      - ../..:/workspace/Workspace-Bench
+      - pip-cache:/root/.cache/pip
+      - uv-cache:/root/.cache/uv
+      - npm-cache:/root/.npm
+      - openclaw-home:/root/.openclaw
+
+volumes:
+  pip-cache:
+  uv-cache:
+  npm-cache:
+  openclaw-home:
