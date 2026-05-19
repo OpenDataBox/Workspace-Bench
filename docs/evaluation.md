@@ -6,6 +6,11 @@ This guide explains how to evaluate AI agents on Workspace-Bench tasks.
 
 Workspace-Bench evaluates agents by placing them in realistic workspace environments, providing a task description, and measuring their ability to produce correct outputs against fine-grained rubrics. The evaluation supports multiple agent harnesses and can be run via Docker for reproducibility.
 
+Agent runs and rubric judging are separate steps. `run-benchmark.sh` runs the
+selected agent and writes outputs plus `agent_runner_report.json`.
+`agent_as_a_judge.py` then evaluates those outputs against the task rubrics
+using a judge model through an Anthropic-compatible API.
+
 ## Supported Harnesses
 
 | Harness | Description | API Compatibility |
@@ -40,6 +45,21 @@ docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
   --model kimi-k2.5 \
   --dataset lite
 ```
+
+Then judge the completed run:
+
+```bash
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
+  python3 -u /workspace/Workspace-Bench/evaluation/src/agent_as_a_judge.py \
+  --task-dir /workspace/Workspace-Bench/evaluation/output/Codex--Kimi-K2.5--Lite \
+  --eval-yaml /workspace/Workspace-Bench/evaluation/runs/judge.yaml \
+  --parallel \
+  --workers 3
+```
+
+`runs/judge.yaml` reads `JUDGE_BASE_URL`, `JUDGE_MODEL`, and `JUDGE_API_KEY`
+from `.env`. The judge endpoint must be Anthropic-compatible because the
+judge is executed through the ClaudeCode harness.
 
 ### Evaluation on the Full Benchmark
 
@@ -86,6 +106,10 @@ Each task directory contains:
 - `output/` — Files produced by the agent
 - `rubrics_judge--{model}.json` — Rubric evaluation results
 - `dependency_graph--{model}.json` — Extracted I/O dependency graph
+
+`agent_runner_report.json` is not the final correctness score; it reports
+whether the agent execution itself completed. Final correctness comes from the
+`rubrics_judge--{model}.json` files produced by `agent_as_a_judge.py`.
 
 ## Interpreting Results
 

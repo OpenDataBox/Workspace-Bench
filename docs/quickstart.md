@@ -7,6 +7,7 @@ This guide will help you get started with Workspace-Bench, from installation to 
 - Docker
 - Python 3
 - API credentials for the agent you want to run
+- An Anthropic-compatible API endpoint for the judge model
 - Node.js (≥ 18, only for the visualization dashboard)
 
 ## Setup
@@ -19,7 +20,7 @@ cd Workspace-Bench/evaluation
 cp .env.example .env
 ```
 
-Fill `.env` with your API credentials before running an evaluation. For the default smoke command below, set `KIMIK25_BASE_URL` and `KIMIK25_API_KEY`.
+Fill `.env` with your API credentials before running an evaluation. For the default smoke command below, set `KIMIK25_BASE_URL` and `KIMIK25_API_KEY`. For rubric judging, also set `JUDGE_BASE_URL`, `JUDGE_MODEL`, and `JUDGE_API_KEY`; the judge endpoint must be Anthropic-compatible because `agent_as_a_judge.py` runs the judge through the ClaudeCode harness.
 
 !!! note "Supported Providers"
     Workspace-Bench supports multiple model providers. See the `.env.example` for the full list of environment variables.
@@ -75,6 +76,24 @@ Task outputs and logs are written to:
 evaluation/output/Codex--Kimi-K2.5--Smoke/
 ```
 
+## Judge Rubrics
+
+The smoke report verifies that the agent run completed and produced output files. To score correctness against the task rubrics, run the judge inside Docker:
+
+```bash
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
+  python3 -u /workspace/Workspace-Bench/evaluation/src/agent_as_a_judge.py \
+  --task-dir /workspace/Workspace-Bench/evaluation/output/Codex--Kimi-K2.5--Smoke \
+  --eval-yaml /workspace/Workspace-Bench/evaluation/runs/judge.yaml \
+  --overwrite
+```
+
+Rubric judgments are written into each task directory:
+
+```text
+evaluation/output/Codex--Kimi-K2.5--Smoke/100/rubrics_judge--{JUDGE_MODEL}.json
+```
+
 ## Run Workspace-Bench-Lite
 
 Run the 100-task Lite benchmark:
@@ -85,6 +104,17 @@ docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
   --harness codex \
   --model kimi-k2.5 \
   --dataset lite
+```
+
+Then judge the completed Lite run:
+
+```bash
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
+  python3 -u /workspace/Workspace-Bench/evaluation/src/agent_as_a_judge.py \
+  --task-dir /workspace/Workspace-Bench/evaluation/output/Codex--Kimi-K2.5--Lite \
+  --eval-yaml /workspace/Workspace-Bench/evaluation/runs/judge.yaml \
+  --parallel \
+  --workers 3
 ```
 
 ## Visualize Results

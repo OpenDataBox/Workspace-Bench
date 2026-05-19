@@ -93,6 +93,7 @@ evaluation.
 - Docker
 - Python 3
 - API credentials for the agent you want to run
+- An Anthropic-compatible API endpoint for the judge model
 
 ```bash
 cd evaluation
@@ -100,7 +101,10 @@ cp .env.example .env
 ```
 
 Fill `.env` before running an evaluation. For the default smoke command below,
-set `KIMIK25_BASE_URL` and `KIMIK25_API_KEY`.
+set `KIMIK25_BASE_URL` and `KIMIK25_API_KEY`. For rubric judging, also set
+`JUDGE_BASE_URL`, `JUDGE_MODEL`, and `JUDGE_API_KEY`; the judge endpoint must
+be Anthropic-compatible because `agent_as_a_judge.py` runs the judge through
+the ClaudeCode harness.
 
 ### Download Data
 
@@ -143,7 +147,25 @@ The expected output is:
 [ok] output/Codex--Kimi-K2.5--Smoke/agent_runner_report.json: 1/1 passed
 ```
 
-Task outputs and logs are written to:
+This report only checks whether the agent run completed and produced the
+expected output files. To score the task against its rubrics, run
+`agent_as_a_judge.py` inside Docker:
+
+```bash
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
+  python3 -u /workspace/Workspace-Bench/evaluation/src/agent_as_a_judge.py \
+  --task-dir /workspace/Workspace-Bench/evaluation/output/Codex--Kimi-K2.5--Smoke \
+  --eval-yaml /workspace/Workspace-Bench/evaluation/runs/judge.yaml \
+  --overwrite
+```
+
+Rubric judgments are written into each task directory as:
+
+```text
+evaluation/output/Codex--Kimi-K2.5--Smoke/100/rubrics_judge--{JUDGE_MODEL}.json
+```
+
+Task outputs, logs, and judge artifacts are written to:
 
 ```text
 evaluation/output/Codex--Kimi-K2.5--Smoke/
@@ -159,6 +181,17 @@ docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
   --harness codex \
   --model kimi-k2.5 \
   --dataset lite
+```
+
+Then judge the completed Lite run:
+
+```bash
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
+  python3 -u /workspace/Workspace-Bench/evaluation/src/agent_as_a_judge.py \
+  --task-dir /workspace/Workspace-Bench/evaluation/output/Codex--Kimi-K2.5--Lite \
+  --eval-yaml /workspace/Workspace-Bench/evaluation/runs/judge.yaml \
+  --parallel \
+  --workers 3
 ```
 
 ### Other Run Configs
