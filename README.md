@@ -36,6 +36,7 @@
 <br />
 
 ## 📰 News
+* **[June 23, 2025]**: The Chinese Version full datasets of Version 1.0 are released ([homepage](https://workspace-bench.github.io/), [huggingface](https://huggingface.co/Workspace-Bench))!
 * **[May 07, 2025]**: The full datasets of Version 1.0 are released ([homepage](https://workspace-bench.github.io/), [huggingface](https://huggingface.co/Workspace-Bench))!
 
 ## 👋 Overview
