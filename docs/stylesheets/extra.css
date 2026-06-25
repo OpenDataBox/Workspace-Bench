@@ -10,12 +10,31 @@
   --wb-text: #111827;
   --wb-text-muted: #64748b;
 
+  --wb-content-text: var(--wb-text);
+  --wb-content-muted: var(--wb-text-muted);
+  --wb-content-link: var(--wb-accent-dark);
+  --wb-content-link-hover: #4338ca;
+  --wb-content-border: var(--wb-border);
+  --wb-content-table-header-bg: #f8fafc;
+
   --wb-accent: #6366f1;
   --wb-accent-dark: #4f46e5;
   --wb-accent-soft: #eef2ff;
 
   --md-accent-fg-color: #6366f1;
   --md-default-bg-color: #f8fafc;
+}
+
+[data-md-color-scheme="slate"] {
+  --wb-content-text: #e2e8f0;
+  --wb-content-muted: #94a3b8;
+  --wb-content-link: #a5b4fc;
+  --wb-content-link-hover: #c7d2fe;
+  --wb-content-border: rgba(148, 163, 184, 0.24);
+  --wb-content-table-header-bg: rgba(148, 163, 184, 0.12);
+
+  --md-accent-fg-color: #a5b4fc;
+  --md-typeset-color: var(--wb-content-text);
 }
 
 /* Header: light pastel gradient so black logo remains visible */
@@ -105,18 +124,18 @@
 
 /* Typography */
 .md-typeset {
-  color: var(--wb-text);
+  color: var(--wb-content-text);
 }
 
 .md-typeset h1 {
-  color: var(--wb-text);
+  color: var(--wb-content-text);
   font-weight: 700;
   letter-spacing: -0.03em;
 }
 
 .md-typeset h2,
 .md-typeset h3 {
-  color: var(--wb-text);
+  color: var(--wb-content-text);
   font-weight: 650;
 }
 
@@ -126,11 +145,11 @@
 }
 
 .md-typeset a {
-  color: var(--wb-accent-dark);
+  color: var(--wb-content-link);
 }
 
 .md-typeset a:hover {
-  color: #4338ca;
+  color: var(--wb-content-link-hover);
 }
 
 .md-typeset img {
@@ -144,19 +163,19 @@
 
 .md-typeset pre {
   border-radius: 8px;
-  border: 1px solid var(--wb-border);
+  border: 1px solid var(--wb-content-border);
 }
 
 /* Tables */
 .md-typeset table:not([class]) {
-  border: 1px solid var(--wb-border);
+  border: 1px solid var(--wb-content-border);
   border-radius: 8px;
   overflow: hidden;
 }
 
 .md-typeset table:not([class]) th {
-  background: #f8fafc;
-  color: var(--wb-text);
+  background: var(--wb-content-table-header-bg);
+  color: var(--wb-content-text);
 }
 
 /* Footer: light, not dark */
