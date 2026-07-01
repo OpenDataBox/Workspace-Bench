@@ -27,13 +27,16 @@ Fill `.env` with your API credentials before running an evaluation. For the defa
 
 ## Download Data
 
-Download the Lite task set and workspace files:
+Download the English Lite task set and workspace files:
 
 ```bash
-python3 scripts/download_hf_assets.py --lite --workspaces
+python3 scripts/download_hf_assets.py --language en --lite --workspaces
 ```
 
 This will populate `evaluation/tasks_lite/` with task metadata and `evaluation/filesys/` with the corresponding workspace files.
+Use `--language cn` for the Chinese version. If you switch languages in an
+existing checkout, add `--force` so `tasks_lite/` and `filesys/` are replaced
+consistently.
 
 ## Build Environment
 

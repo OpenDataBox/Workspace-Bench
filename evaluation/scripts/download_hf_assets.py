@@ -9,13 +9,34 @@ from pathlib import Path
 from typing import Any, Dict
 
 
+LANGUAGE_ALIASES = {
+    "en": "en",
+    "cn": "cn",
+    "zh": "cn",
+}
+
 DATASETS = {
     "lite": ("Workspace-Bench/Workspace-Bench-Lite", "tasks_lite"),
     "full": ("Workspace-Bench/Workspace-Bench", "tasks"),
     "workspaces": ("Workspace-Bench/Workspace-Bench-Workspaces", "filesys"),
 }
 
-WORKSPACE_ARCHIVE = "filesys_en_workdirs.zip"
+TASK_LAYOUTS = {
+    "lite": {
+        "en": ("task_lite_clean_en", "task_lite_clean_en_metadata_table.csv"),
+        "cn": ("task_lite_clean_cn", "task_lite_clean_cn_metadata_table.csv"),
+    },
+    "full": {
+        "en": ("task_clean_en", "task_en_metadata_table.csv"),
+        "cn": ("task_clean_cn", "task_clean_cn_metadata_table.csv"),
+    },
+}
+
+WORKSPACE_ARCHIVES = {
+    "en": "filesys_en.zip",
+    "cn": "filesys_cn.zip",
+}
+LANGUAGE_MARKER = ".workspace_bench_language"
 WORKSPACE_RAW_DIRS = (
     "chanpin_raw",
     "kaifa_raw",
@@ -23,12 +44,60 @@ WORKSPACE_RAW_DIRS = (
     "yunying_raw",
     "houqin_raw",
 )
-WORKSPACE_EXTRACTED_DIR_MAP = {
-    "ProductManager_Workdir": "chanpin_raw",
-    "BackendDeveloper_Workdir": "kaifa_raw",
-    "Research_Workdir": "research_raw",
-    "OperationsManager_Workdir": "yunying_raw",
-    "LogisticsManager_Workdir": "houqin_raw",
+WORKSPACE_EXTRACTED_DIR_CANDIDATES = {
+    "chanpin_raw": (
+        "chanpin_raw",
+        "ProductManager_Workdir",
+        "AIProductManager_Workdir",
+        "ProductManager",
+        "AIProductManager",
+        "Product_Manager_Workdir",
+        "AI_Product_Manager_Workdir",
+        "产品人员_Workdir",
+        "产品经理_Workdir",
+        "产品人员",
+        "产品经理",
+    ),
+    "kaifa_raw": (
+        "kaifa_raw",
+        "BackendDeveloper_Workdir",
+        "BackendDeveloper",
+        "Backend_Developer_Workdir",
+        "开发人员_Workdir",
+        "后端开发人员_Workdir",
+        "开发人员",
+        "后端开发人员",
+    ),
+    "research_raw": (
+        "research_raw",
+        "Research_Workdir",
+        "Researcher_Workdir",
+        "Researcher",
+        "研究人员_Workdir",
+        "研究人员",
+    ),
+    "yunying_raw": (
+        "yunying_raw",
+        "OperationsManager_Workdir",
+        "OperationsManager",
+        "Operations_Manager_Workdir",
+        "运营人员_Workdir",
+        "运营经理_Workdir",
+        "运营人员",
+        "运营经理",
+    ),
+    "houqin_raw": (
+        "houqin_raw",
+        "LogisticsManager_Workdir",
+        "LogisticsManager",
+        "Logistics_Manager_Workdir",
+        "行政后勤人员_Workdir",
+        "行政_后勤人员_Workdir",
+        "后勤人员_Workdir",
+        "行政后勤人员",
+        "行政_后勤人员",
+        "后勤人员",
+    ),
 }
 
 PERSONA_TO_FILE_SYSTEM = {
@@ -50,6 +119,14 @@ def _load_jsonish(value: str) -> Any:
         return json.loads(s)
     except Exception:
         return value
+
+
+def _normalize_language(language: str) -> str:
+    key = str(language or "").strip().lower()
+    if key not in LANGUAGE_ALIASES:
+        valid = ", ".join(sorted(LANGUAGE_ALIASES))
+        raise SystemExit(f"unsupported language: {language!r}; choose one of: {valid}")
+    return LANGUAGE_ALIASES[key]
 
 
 def _safe_task_id(row: Dict[str, str]) -> str:
@@ -146,7 +223,38 @@ def _find_csv(path: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def _snapshot_download(repo_id: str, dst: Path, revision: str | None) -> Path:
+def _read_language_marker(path: Path) -> str | None:
+    marker = path / LANGUAGE_MARKER
+    try:
+        value = marker.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+    return _normalize_language(value) if value else None
+
+
+def _write_language_marker(path: Path, language: str) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / LANGUAGE_MARKER).write_text(f"{language}\n", encoding="utf-8")
+
+
+def _ensure_language_compatible(path: Path, language: str, force: bool, asset_name: str) -> None:
+    existing = _read_language_marker(path)
+    if existing and existing != language and not force:
+        raise SystemExit(
+            f"{asset_name} already exists for language '{existing}' under {path}. "
+            f"Re-run with --force to replace it with '{language}'."
+        )
+
+
+def _snapshot_download(
+    repo_id: str,
+    dst: Path,
+    revision: str | None,
+    max_workers: int,
+    allow_patterns: list[str] | None = None,
+) -> Path:
     try:
         from huggingface_hub import snapshot_download
     except ImportError as exc:
@@ -160,6 +268,8 @@ def _snapshot_download(repo_id: str, dst: Path, revision: str | None) -> Path:
             revision=revision,
             local_dir=str(dst),
             local_dir_use_symlinks=False,
+            max_workers=max_workers,
+            allow_patterns=allow_patterns,
         )
     )
 
@@ -205,39 +315,45 @@ def _workspace_dirs_exist(dst: Path) -> bool:
     return all((dst / name).is_dir() for name in WORKSPACE_RAW_DIRS)
 
 
-def _normalize_workspace_layout(dst: Path, force: bool) -> bool:
+def _normalize_workspace_layout(dst: Path, force: bool, language: str) -> bool:
     if _workspace_dirs_exist(dst) and not force:
         return True
 
-    extracted_roots = [dst, dst / "filesys_en"]
+    extracted_roots = [
+        dst,
+        dst / f"filesys_{language}",
+        dst / "filesys_en",
+        dst / "filesys_cn",
+    ]
     moved_any = False
-    for src_name, dst_name in WORKSPACE_EXTRACTED_DIR_MAP.items():
+    for dst_name, src_names in WORKSPACE_EXTRACTED_DIR_CANDIDATES.items():
         target = dst / dst_name
-        if target.exists() and force:
-            shutil.rmtree(target) if target.is_dir() else target.unlink()
         if target.exists():
             continue
         for extracted_root in extracted_roots:
-            source = extracted_root / src_name
-            if source.is_dir():
-                shutil.move(str(source), str(target))
-                moved_any = True
+            for src_name in src_names:
+                source = extracted_root / src_name
+                if source.is_dir():
+                    shutil.move(str(source), str(target))
+                    moved_any = True
+                    break
+            if target.exists():
                 break
 
-    nested_root = dst / "filesys_en"
-    if nested_root.is_dir() and not any(nested_root.iterdir()):
-        nested_root.rmdir()
+    for nested_root in (dst / "filesys_en", dst / "filesys_cn"):
+        if nested_root.is_dir() and not any(nested_root.iterdir()):
+            nested_root.rmdir()
 
     if moved_any:
         print(f"[ok] normalized workspace directory names under {dst}")
     return _workspace_dirs_exist(dst)
 
 
-def _extract_workspace_archive(archive_path: Path, dst: Path, force: bool) -> None:
+def _extract_workspace_archive(archive_path: Path, dst: Path, force: bool, language: str) -> None:
     _require_command("unzip")
     if not archive_path.exists():
         raise SystemExit(f"workspace archive not found: {archive_path}")
-    if _normalize_workspace_layout(dst, force=False) and not force:
+    if _normalize_workspace_layout(dst, force=False, language=language) and not force:
         print(f"[ok] workspace filesystems already extracted under {dst}")
         return
     for name in WORKSPACE_RAW_DIRS:
@@ -255,23 +371,43 @@ def _extract_workspace_archive(archive_path: Path, dst: Path, force: bool) -> No
         ],
         check=True,
     )
-    if not _normalize_workspace_layout(dst, force=force):
+    if not _normalize_workspace_layout(dst, force=force, language=language):
         raise SystemExit(
             "workspace archive extracted, but expected raw workspace directories "
             f"were not found under {dst}"
         )
 
 
-def download_tasks(kind: str, eval_root: Path, revision: str | None, force: bool) -> None:
+def download_tasks(
+    kind: str,
+    eval_root: Path,
+    revision: str | None,
+    force: bool,
+    max_workers: int,
+    language: str,
+) -> None:
     repo_id, dirname = DATASETS[kind]
+    task_dirname, metadata_csv = TASK_LAYOUTS[kind][language]
     dst = eval_root / dirname
-    tmp = eval_root / ".generated" / "hf_downloads" / kind
+    tmp = eval_root / ".generated" / "hf_downloads" / f"{kind}_{language}"
+    _ensure_language_compatible(dst, language, force, f"{kind} tasks")
     if force and dst.exists():
         shutil.rmtree(dst)
     dst.mkdir(parents=True, exist_ok=True)
-    snapshot = _snapshot_download(repo_id, tmp, revision)
+    snapshot = _snapshot_download(
+        repo_id,
+        tmp,
+        revision,
+        max_workers,
+        allow_patterns=[f"{task_dirname}/**", metadata_csv],
+    )
 
-    metadata_root = _find_metadata_root(snapshot)
+    preferred_metadata_root = snapshot / task_dirname
+    metadata_root = (
+        preferred_metadata_root
+        if _has_metadata_dirs(preferred_metadata_root)
+        else _find_metadata_root(snapshot)
+    )
     if metadata_root is not None:
         for child in metadata_root.iterdir():
             if child.name.startswith("."):
@@ -287,29 +423,36 @@ def download_tasks(kind: str, eval_root: Path, revision: str | None, force: bool
             else:
                 shutil.copy2(child, target)
         count = _normalize_task_metadata_files(dst)
-        print(f"[ok] downloaded {count} {kind} task directories to {dst}")
+        _write_language_marker(dst, language)
+        print(f"[ok] downloaded {count} {language} {kind} task directories to {dst}")
         return
 
-    csv_path = _find_csv(snapshot)
+    preferred_csv = snapshot / metadata_csv
+    csv_path = preferred_csv if preferred_csv.is_file() else _find_csv(snapshot)
     if not csv_path:
         raise SystemExit(f"No task directories or CSV file found in {snapshot}")
     count = _materialize_csv(csv_path, dst)
-    print(f"[ok] materialized {count} {kind} metadata files under {dst}")
+    _write_language_marker(dst, language)
+    print(f"[ok] materialized {count} {language} {kind} metadata files under {dst}")
 
 
-def download_workspaces(eval_root: Path, revision: str | None, force: bool) -> None:
+def download_workspaces(eval_root: Path, revision: str | None, force: bool, language: str) -> None:
     repo_id, dirname = DATASETS["workspaces"]
     dst = eval_root / dirname
-    archive_path = dst / WORKSPACE_ARCHIVE
-    if _normalize_workspace_layout(dst, force=False) and not force:
+    archive_name = WORKSPACE_ARCHIVES[language]
+    archive_path = dst / archive_name
+    _ensure_language_compatible(dst, language, force, "workspace filesystems")
+    if _normalize_workspace_layout(dst, force=False, language=language) and not force:
         print(f"[ok] workspace filesystems already exist under {dst}")
+        _write_language_marker(dst, language)
         return
     dst.mkdir(parents=True, exist_ok=True)
-    url = _hf_dataset_url(repo_id, WORKSPACE_ARCHIVE, revision)
+    url = _hf_dataset_url(repo_id, archive_name, revision)
     _download_with_wget(url, archive_path, force)
     print(f"[ok] downloaded workspace archive to {archive_path}")
-    _extract_workspace_archive(archive_path, dst, force)
-    print(f"[ok] extracted workspace filesystems to {dst}")
+    _extract_workspace_archive(archive_path, dst, force, language)
+    _write_language_marker(dst, language)
+    print(f"[ok] extracted {language} workspace filesystems to {dst}")
 
 
 def main() -> None:
@@ -318,8 +461,21 @@ def main() -> None:
     parser.add_argument("--full", action="store_true", help="Download/materialize full Workspace-Bench tasks.")
     parser.add_argument("--workspaces", action="store_true", help="Download workspace filesystem assets.")
     parser.add_argument("--all", action="store_true", help="Download all task and workspace assets.")
+    parser.add_argument(
+        "--language",
+        "--lang",
+        choices=sorted(LANGUAGE_ALIASES),
+        default="en",
+        help="Dataset language to download: en for English or cn/zh for Chinese. Defaults to en.",
+    )
     parser.add_argument("--revision", default=None, help="Optional Hugging Face dataset revision.")
     parser.add_argument("--force", action="store_true", help="Replace existing target directories.")
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=int(os.environ.get("HF_HUB_MAX_WORKERS", "8")),
+        help="Maximum parallel Hugging Face downloads for task snapshots.",
+    )
     parser.add_argument(
         "--eval-root",
         default=os.environ.get("WORKSPACE_BENCH_EVAL_ROOT") or os.environ.get("RIP_BENCH_EVAL_ROOT") or ".",
@@ -331,12 +487,13 @@ def main() -> None:
     if not (eval_root / "runs").exists():
         raise SystemExit(f"evaluation root not found: {eval_root}")
 
+    language = _normalize_language(args.language)
     if args.all or args.lite:
-        download_tasks("lite", eval_root, args.revision, args.force)
+        download_tasks("lite", eval_root, args.revision, args.force, args.max_workers, language)
     if args.all or args.full:
-        download_tasks("full", eval_root, args.revision, args.force)
+        download_tasks("full", eval_root, args.revision, args.force, args.max_workers, language)
     if args.all or args.workspaces:
-        download_workspaces(eval_root, args.revision, args.force)
+        download_workspaces(eval_root, args.revision, args.force, language)
     if not (args.all or args.lite or args.full or args.workspaces):
         parser.error("choose at least one of --lite, --full, --workspaces, or --all")
 

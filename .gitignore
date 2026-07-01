@@ -32,6 +32,7 @@ evaluation/output/
 evaluation/packages/
 evaluation/tasks/
 evaluation/tasks_lite/
+evaluation/tasks_*
 !evaluation/tasks/README.md
 !evaluation/tasks_lite/README.md
 evaluation/tmp/
