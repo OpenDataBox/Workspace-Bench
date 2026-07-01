@@ -37,6 +37,8 @@ This will populate `evaluation/tasks_lite/` with task metadata and `evaluation/f
 Use `--language cn` for the Chinese version. If you switch languages in an
 existing checkout, add `--force` so `tasks_lite/` and `filesys/` are replaced
 consistently.
+Task metadata includes `language: en` or `language: cn`, and generated run
+configs use `prompt_language: auto` so task prompts follow that metadata.
 
 ## Build Environment
 

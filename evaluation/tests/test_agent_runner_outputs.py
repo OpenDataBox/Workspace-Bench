@@ -25,7 +25,19 @@ class AgentRunnerOutputCollectionTests(unittest.TestCase):
             f.write(content)
         return path
 
-    def _run_case(self, td: str, run_fn, *, standard_files=None):
+    def _run_case(
+        self,
+        td: str,
+        run_fn,
+        *,
+        standard_files=None,
+        meta=None,
+        prompt_head="",
+        prompt_tail="",
+        prompt_language="auto",
+        prompt_head_by_language=None,
+        prompt_tail_by_language=None,
+    ):
         standard = os.path.join(td, "standard")
         shared = os.path.join(td, "shared")
         runs_root = os.path.join(td, "runs")
@@ -36,11 +48,11 @@ class AgentRunnerOutputCollectionTests(unittest.TestCase):
 
         res = agent_runner._run_one_case(
             idx=0,
-            meta={"id": "case", "file_system": "role", "task": "produce output"},
+            meta=meta or {"id": "case", "file_system": "role", "task": "produce output"},
             runs_root=runs_root,
             run_fn=run_fn,
-            prompt_head="",
-            prompt_tail="",
+            prompt_head=prompt_head,
+            prompt_tail=prompt_tail,
             task_target_output_dir="model_output",
             timeout_sec=10,
             api_provider={},
@@ -52,6 +64,9 @@ class AgentRunnerOutputCollectionTests(unittest.TestCase):
             model_name="TestModel",
             isolated_workdir=True,
             task_workdir_cleanup="never",
+            prompt_language=prompt_language,
+            prompt_head_by_language=prompt_head_by_language,
+            prompt_tail_by_language=prompt_tail_by_language,
         )
         case_dir = os.path.join(runs_root, "case")
         with open(os.path.join(case_dir, "agent.json"), "r", encoding="utf-8") as f:
@@ -127,6 +142,101 @@ class AgentRunnerOutputCollectionTests(unittest.TestCase):
         self.assertEqual(agent_json["runnerStatus"], "timeout")
         self.assertTrue(agent_json["partialOutputCollected"])
         self.assertEqual(agent_json["errorType"], "Timeout")
+
+    def test_wrap_prompt_uses_chinese_for_chinese_metadata(self):
+        prompt = agent_runner._wrap_prompt(
+            prompt="请生成报告",
+            work_dir="/tmp/work",
+            prompt_head="",
+            prompt_tail="",
+            task_target_output_dir="model_output",
+            language="cn",
+        )
+
+        self.assertIn("工作目录", prompt)
+        self.assertIn("输出路径列表", prompt)
+        self.assertNotIn("Working Directory", prompt)
+
+    def test_wrap_prompt_uses_english_for_english_metadata(self):
+        prompt = agent_runner._wrap_prompt(
+            prompt="Create the report",
+            work_dir="/tmp/work",
+            prompt_head="",
+            prompt_tail="",
+            task_target_output_dir="model_output",
+            language="en",
+        )
+
+        self.assertIn("Working Directory", prompt)
+        self.assertIn("Output Path List", prompt)
+        self.assertNotIn("工作目录", prompt)
+
+    def test_infers_language_from_missing_metadata(self):
+        self.assertEqual(
+            agent_runner._infer_language_from_meta(
+                {
+                    "task": "请根据输入文件生成完整的中文分析报告。",
+                    "rubrics": ["报告内容准确完整。"],
+                }
+            ),
+            "cn",
+        )
+        self.assertEqual(
+            agent_runner._infer_language_from_meta(
+                {
+                    "task": "Create a concise English report from the input files.",
+                    "rubrics": ["The report is accurate."],
+                }
+            ),
+            "en",
+        )
+
+    def test_auto_prompt_language_ignores_scalar_prompt_tail_and_records_trace(self):
+        seen = {}
+
+        def fake_run(*, prompt, work_dir, sandbox_dir, timeout_s, api_provider):
+            seen["prompt"] = prompt
+            out_dir = os.path.join(work_dir, "model_output")
+            os.makedirs(out_dir, exist_ok=True)
+            self._write_file(out_dir, "a.txt", "answer")
+            return {"status": "ok", "paths": [], "trace": {"lastText": ""}, "metrics": {}}
+
+        with tempfile.TemporaryDirectory() as td:
+            _, agent_json, _ = self._run_case(
+                td,
+                fake_run,
+                meta={"id": "case", "file_system": "role", "task": "Create report", "language": "en"},
+                prompt_tail="LEGACY SCALAR TAIL",
+                prompt_language="auto",
+            )
+
+        self.assertNotIn("LEGACY SCALAR TAIL", seen["prompt"])
+        self.assertIn("Working Directory", seen["prompt"])
+        self.assertEqual(agent_json["trace"]["prompt"]["language"], "en")
+        self.assertEqual(agent_json["trace"]["prompt"]["languageSource"], "metadata")
+        self.assertIsNone(agent_json["trace"]["prompt"]["promptTail"])
+
+    def test_auto_prompt_language_uses_language_specific_tail(self):
+        seen = {}
+
+        def fake_run(*, prompt, work_dir, sandbox_dir, timeout_s, api_provider):
+            seen["prompt"] = prompt
+            out_dir = os.path.join(work_dir, "model_output")
+            os.makedirs(out_dir, exist_ok=True)
+            self._write_file(out_dir, "a.txt", "answer")
+            return {"status": "ok", "paths": [], "trace": {"lastText": ""}, "metrics": {}}
+
+        with tempfile.TemporaryDirectory() as td:
+            _, agent_json, _ = self._run_case(
+                td,
+                fake_run,
+                meta={"id": "case", "file_system": "role", "task": "请根据输入文件生成完整报告", "language": "cn"},
+                prompt_language="auto",
+                prompt_tail_by_language={"cn": "中文尾部"},
+            )
+
+        self.assertIn("中文尾部", seen["prompt"])
+        self.assertEqual(agent_json["trace"]["prompt"]["promptTail"], "中文尾部")
 
 
 if __name__ == "__main__":

@@ -118,6 +118,9 @@ python3 scripts/download_hf_assets.py --language en --lite --workspaces
 Use `--language cn` for the Chinese version. If you switch languages in an
 existing checkout, add `--force` so `tasks_lite/` and `filesys/` are replaced
 consistently.
+Downloaded task metadata includes a normalized `language` field (`en` or `cn`).
+Generated run configs default to `prompt_language: auto`, so the runner injects
+English or Chinese task prompts per metadata entry.
 
 ### Build Environment
 

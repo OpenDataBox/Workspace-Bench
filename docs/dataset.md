@@ -59,6 +59,11 @@ A curated **100-task subset** that preserves the full benchmark's distribution a
 python3 scripts/download_hf_assets.py --lite --workspaces
 ```
 
+Materialized `metadata.json` files include a normalized `language` field
+(`en` or `cn`). The evaluation runner defaults to `prompt_language: auto` and
+uses that field, with content detection as a fallback, to choose English or
+Chinese runtime prompts.
+
 ### Full Workspace-Bench
 
 The complete **388-task** dataset with all workspaces.

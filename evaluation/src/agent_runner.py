@@ -21,6 +21,166 @@ import agent_as_a_judge
 
 Json = Any
 
+LANGUAGE_ALIASES = {
+    "en": "en",
+    "cn": "cn",
+    "zh": "cn",
+}
+
+
+def _normalize_language_value(value: Json) -> Optional[str]:
+    key = str(value or "").strip().lower()
+    if not key:
+        return None
+    return LANGUAGE_ALIASES.get(key)
+
+
+def _normalize_prompt_language(value: Json) -> str:
+    key = str(value or "auto").strip().lower()
+    if not key or key == "auto":
+        return "auto"
+    lang = _normalize_language_value(key)
+    if lang:
+        return lang
+    valid = ", ".join(["auto"] + sorted(LANGUAGE_ALIASES))
+    raise SystemExit(f"unsupported prompt_language: {value!r}; choose one of: {valid}")
+
+
+def _is_cjk(ch: str) -> bool:
+    code = ord(ch)
+    return (
+        0x3400 <= code <= 0x4DBF
+        or 0x4E00 <= code <= 0x9FFF
+        or 0xF900 <= code <= 0xFAFF
+        or 0x20000 <= code <= 0x2A6DF
+        or 0x2A700 <= code <= 0x2B73F
+        or 0x2B740 <= code <= 0x2B81F
+        or 0x2B820 <= code <= 0x2CEAF
+    )
+
+
+def _flatten_language_values(value: Json) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        out: List[str] = []
+        for item in value:
+            out.extend(_flatten_language_values(item))
+        return out
+    if isinstance(value, dict):
+        out = []
+        for item in value.values():
+            out.extend(_flatten_language_values(item))
+        return out
+    return []
+
+
+def _detect_language_from_text(*values: Json) -> str:
+    text = "\n".join(part for value in values for part in _flatten_language_values(value))
+    cjk = 0
+    latin = 0
+    for ch in text:
+        if _is_cjk(ch):
+            cjk += 1
+        elif ("a" <= ch <= "z") or ("A" <= ch <= "Z"):
+            latin += 1
+    denom = cjk + latin
+    if cjk >= 8 and denom > 0 and (cjk / denom) >= 0.08:
+        return "cn"
+    return "en"
+
+
+def _language_signal_present(*values: Json) -> bool:
+    text = "\n".join(part for value in values for part in _flatten_language_values(value))
+    return any(_is_cjk(ch) or ("a" <= ch <= "z") or ("A" <= ch <= "Z") for ch in text)
+
+
+def _meta_language_values(meta: Dict[str, Json]) -> List[Json]:
+    return [meta.get("task"), meta.get("rubrics"), meta.get("rubric_types")]
+
+
+def _language_marker_from_meta(meta: Dict[str, Json]) -> Optional[str]:
+    mp = meta.get("__metadata_path")
+    if not isinstance(mp, str) or not mp.strip():
+        return None
+    cur = Path(mp).resolve().parent
+    for _ in range(3):
+        marker = cur / ".workspace_bench_language"
+        try:
+            value = marker.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            value = ""
+        except Exception:
+            value = ""
+        lang = _normalize_language_value(value)
+        if lang:
+            return lang
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+    return None
+
+
+def _language_warning(task_id: Json, message: str) -> str:
+    prefix = f"task {task_id}: " if task_id else ""
+    return f"[language-warning] {prefix}{message}"
+
+
+def _resolve_language_info(meta: Dict[str, Json]) -> Dict[str, Json]:
+    values = _meta_language_values(meta)
+    detected = _detect_language_from_text(*values)
+    has_signal = _language_signal_present(*values)
+    raw_meta_language = meta.get("language")
+    meta_language = _normalize_language_value(raw_meta_language)
+    task_id = meta.get("id")
+
+    if raw_meta_language not in (None, "") and meta_language is None:
+        warning = _language_warning(
+            task_id,
+            f"unsupported metadata language {raw_meta_language!r}; falling back to content detection",
+        )
+        if has_signal:
+            return {"language": detected, "source": "detected", "warning": warning}
+        marker_language = _language_marker_from_meta(meta)
+        if marker_language:
+            return {"language": marker_language, "source": "marker", "warning": warning}
+        return {"language": "en", "source": "default", "warning": warning}
+
+    if meta_language:
+        warning = None
+        if has_signal and detected != meta_language:
+            warning = _language_warning(
+                task_id,
+                f"metadata language {meta_language!r} conflicts with content-detected {detected!r}; using metadata",
+            )
+        return {"language": meta_language, "source": "metadata", "warning": warning}
+
+    if has_signal:
+        return {"language": detected, "source": "detected", "warning": None}
+
+    marker_language = _language_marker_from_meta(meta)
+    if marker_language:
+        return {"language": marker_language, "source": "marker", "warning": None}
+    return {"language": "en", "source": "default", "warning": None}
+
+
+def _infer_language_from_meta(meta: Dict[str, Json]) -> str:
+    return str(_resolve_language_info(meta).get("language") or "en")
+
+
+def _language_text_map(value: Json) -> Dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    out: Dict[str, str] = {}
+    for raw_key, raw_value in value.items():
+        lang = _normalize_language_value(raw_key)
+        if lang and raw_value is not None:
+            out[lang] = str(raw_value)
+    return out
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent
 
@@ -239,26 +399,72 @@ def _expected_output_files(meta: Dict[str, Json]) -> List[str]:
     return []
 
 
-def _wrap_prompt(*, prompt: str, work_dir: str, prompt_head: str, prompt_tail: str, task_target_output_dir: str) -> str:
-    if task_target_output_dir != "":
-        path_requirement = f"请你无视任务要求中的输出文件保存路径要求，将所有输出文件放置在目录：{os.path.join(work_dir, task_target_output_dir)}下\n"
+def _wrap_prompt(
+    *,
+    prompt: str,
+    work_dir: str,
+    prompt_head: str,
+    prompt_tail: str,
+    task_target_output_dir: str,
+    language: str,
+) -> str:
+    language = _normalize_language_value(language) or "en"
+    if language == "cn":
+        if task_target_output_dir != "":
+            path_requirement = f"请你无视任务要求中的输出文件保存路径要求，将所有输出文件放置在目录：{os.path.join(work_dir, task_target_output_dir)}下\n"
+        else:
+            path_requirement = ""
+        head = (
+            "【重要要求 1：工作目录】\n"
+            f"本轮测试允许访问的工作目录是：{os.path.abspath(work_dir)}\n"
+            "你只能在该目录下使用相对路径读写文件；禁止访问工作目录以外的位置。\n"
+            "如果你看到其他工作区路径提示，请忽略，以本提示的工作目录为准。\n"
+            f"{path_requirement}"
+        )
+        tail = (
+            "\n【重要要求 2：输出路径列表】\n"
+            "在最后一步，请仅输出一个 Python 列表（list[str]），里面是你生成的所有输出文件路径。\n"
+            "路径请使用相对工作目录的相对路径（不要以 / 开头）。示例：['output/a.txt','report.md']\n"
+        )
     else:
-        path_requirement = ""
-    head = (
-        "【重要要求 1：工作目录】\n"
-        f"本轮测试允许访问的工作目录是：{os.path.abspath(work_dir)}\n"
-        "你只能在该目录下使用相对路径读写文件；禁止访问工作目录以外的位置。\n"
-        "如果你看到其他工作区路径提示，请忽略，以本提示的工作目录为准。\n"
-        f"{path_requirement}"
-    )
-    tail = (
-        "\n【重要要求 2：输出路径列表】\n"
-        "在最后一步，请仅输出一个 Python 列表（list[str]），里面是你生成的所有输出文件路径。\n"
-        "路径请使用相对工作目录的相对路径（不要以 / 开头）。示例：['output/a.txt','report.md']\n"
-    )
+        if task_target_output_dir != "":
+            path_requirement = (
+                "Ignore any output-file save path requirements inside the task. "
+                f"Place all output files under: {os.path.join(work_dir, task_target_output_dir)}\n"
+            )
+        else:
+            path_requirement = ""
+        head = (
+            "[Important Requirement 1: Working Directory]\n"
+            f"The working directory you may access for this test is: {os.path.abspath(work_dir)}\n"
+            "Use relative paths inside this directory to read and write files; do not access locations outside it.\n"
+            "If you see any other workspace path instructions, ignore them and use this working directory as authoritative.\n"
+            f"{path_requirement}"
+        )
+        tail = (
+            "\n[Important Requirement 2: Output Path List]\n"
+            "At the final step, output only one Python list (list[str]) containing every output file path you generated.\n"
+            "Use paths relative to the working directory (do not start with /). Example: ['output/a.txt','report.md']\n"
+        )
     p = str(prompt or "").strip()
     p2 = (str(prompt_head or "") + ("\n" if prompt_head else "") + p + ("\n" if prompt_tail else "") + str(prompt_tail or "")).strip()
     return head + "\n" + p2 + "\n" + tail
+
+
+def _prompt_parts_for_language(
+    *,
+    language: str,
+    prompt_language: str,
+    prompt_head: str,
+    prompt_tail: str,
+    prompt_head_by_language: Optional[Dict[str, str]],
+    prompt_tail_by_language: Optional[Dict[str, str]],
+) -> Tuple[str, str]:
+    if prompt_language == "auto":
+        heads = prompt_head_by_language or {}
+        tails = prompt_tail_by_language or {}
+        return heads.get(language, ""), tails.get(language, "")
+    return str(prompt_head or ""), str(prompt_tail or "")
 
 
 def _parse_python_list_paths(text: str) -> List[str]:
@@ -779,6 +985,9 @@ def _run_one_case(
     model_name: str,
     isolated_workdir: bool,
     task_workdir_cleanup: str,
+    prompt_language: str = "auto",
+    prompt_head_by_language: Optional[Dict[str, str]] = None,
+    prompt_tail_by_language: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Json]:
     print(f"run task: {meta.get('id') or ''}")
     summary = _new_summary()
@@ -854,12 +1063,39 @@ def _run_one_case(
         task_target_output_dir=task_target_output_dir,
     )
 
+    prompt_language = _normalize_prompt_language(prompt_language)
+    language_info = _resolve_language_info(meta)
+    language = str(language_info.get("language") or "en")
+    if prompt_language != "auto":
+        inferred_language = language
+        language = prompt_language
+        if inferred_language != language:
+            language_info["warning"] = _language_warning(
+                meta.get("id"),
+                f"prompt_language forces {language!r}; inferred task language is {inferred_language!r}",
+            )
+        language_info["source"] = "config"
+        language_info["language"] = language
+    language_warning = language_info.get("warning")
+    if isinstance(language_warning, str) and language_warning:
+        print(language_warning, flush=True)
+
+    effective_prompt_head, effective_prompt_tail = _prompt_parts_for_language(
+        language=language,
+        prompt_language=prompt_language,
+        prompt_head=prompt_head,
+        prompt_tail=prompt_tail,
+        prompt_head_by_language=prompt_head_by_language,
+        prompt_tail_by_language=prompt_tail_by_language,
+    )
+
     prompt = _wrap_prompt(
         prompt=str(meta.get("task") or ""),
         work_dir=work_dir,
-        prompt_head=prompt_head,
-        prompt_tail=prompt_tail,
+        prompt_head=effective_prompt_head,
+        prompt_tail=effective_prompt_tail,
         task_target_output_dir=task_target_output_dir,
+        language=language,
     )
 
     case_started = time.time()
@@ -1012,7 +1248,14 @@ def _run_one_case(
         "traceback": None,
         "workDirCopy": workdir_copy_info or None,
         "trace": {
-            "prompt": {"system": None, "user": prompt, "promptTail": prompt_tail or None},
+            "prompt": {
+                "system": None,
+                "user": prompt,
+                "promptTail": effective_prompt_tail or None,
+                "language": language,
+                "languageSource": language_info.get("source") or "default",
+                **({"languageDetectionWarning": language_warning} if isinstance(language_warning, str) and language_warning else {}),
+            },
             "executionTrace": exec_from_agent or [],
             "llm": {
                 "provider": (llm_from_agent.get("provider") if isinstance(llm_from_agent, dict) else (str(api_provider.get("provider_type") or "") if isinstance(api_provider, dict) else None)),
@@ -1111,6 +1354,9 @@ def _run_group(
     model_name: str,
     isolated_workdir: bool,
     task_workdir_cleanup: str,
+    prompt_language: str = "auto",
+    prompt_head_by_language: Optional[Dict[str, str]] = None,
+    prompt_tail_by_language: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Json]:
     group_summary = _new_summary()
     group_cases: List[Tuple[int, Dict[str, Json]]] = []
@@ -1133,6 +1379,9 @@ def _run_group(
             model_name=model_name,
             isolated_workdir=isolated_workdir,
             task_workdir_cleanup=task_workdir_cleanup,
+            prompt_language=prompt_language,
+            prompt_head_by_language=prompt_head_by_language,
+            prompt_tail_by_language=prompt_tail_by_language,
         )
         _merge_summary(group_summary, res["summary"])
         if isinstance(res.get("case"), dict):
@@ -1164,6 +1413,9 @@ def main() -> None:
     fs_map_file = str(cfg.get("fs_map_file") or "").strip()
     prompt_head = str(cfg.get("prompt_head") or "")
     prompt_tail = str(cfg.get("prompt_tail") or "")
+    prompt_language = _normalize_prompt_language(cfg.get("prompt_language", "auto"))
+    prompt_head_by_language = _language_text_map(cfg.get("prompt_head_by_language"))
+    prompt_tail_by_language = _language_text_map(cfg.get("prompt_tail_by_language"))
     task_limit = cfg.get("task_limit")
     timeout_sec = float(cfg.get("timeout_sec") or 300.0)
     api_provider = cfg.get("api_provider") if isinstance(cfg.get("api_provider"), dict) else {}
@@ -1231,6 +1483,9 @@ def main() -> None:
                         model_name=model_name,
                         isolated_workdir=True,
                         task_workdir_cleanup=task_workdir_cleanup,
+                        prompt_language=prompt_language,
+                        prompt_head_by_language=prompt_head_by_language,
+                        prompt_tail_by_language=prompt_tail_by_language,
                     )
                     future_to_task[fut] = {
                         "caseId": str(meta.get("id") or ""),
@@ -1276,6 +1531,9 @@ def main() -> None:
                         model_name=model_name,
                         isolated_workdir=False,
                         task_workdir_cleanup=task_workdir_cleanup,
+                        prompt_language=prompt_language,
+                        prompt_head_by_language=prompt_head_by_language,
+                        prompt_tail_by_language=prompt_tail_by_language,
                     )
                     future_to_group[fut] = {
                         "groupName": group_name,
@@ -1317,6 +1575,9 @@ def main() -> None:
                     model_name=model_name,
                     isolated_workdir=False,
                     task_workdir_cleanup=task_workdir_cleanup,
+                    prompt_language=prompt_language,
+                    prompt_head_by_language=prompt_head_by_language,
+                    prompt_tail_by_language=prompt_tail_by_language,
                 )
                 _merge_summary(summary, res["summary"])
                 for idx, case_out in res["cases"]:

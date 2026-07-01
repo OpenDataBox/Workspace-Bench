@@ -28,14 +28,6 @@ MODEL_ALIASES = {
     "qwen-3.6": ("Qwen-3.6", "qwen/qwen3.6-35b-a3b", "QWEN36"),
 }
 
-PROMPT_TAIL = (
-    "[Note] Save all task deliverables to the required location inside the working directory. "
-    "When you finish, provide the final output file paths as a list. "
-    "The paths must be relative to the working directory, for example "
-    "['model_output/a.xlsx', 'model_output/b.docx']."
-)
-
-
 def _safe_slug(value: str) -> str:
     s = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
     return s.strip("-").lower() or "custom"
@@ -138,8 +130,11 @@ def build_config(args: argparse.Namespace) -> Path:
         "task_path": str(task_path),
         "output_dir": str(eval_root / "output"),
         "fs_map_file": str(fs_map_path),
+        "prompt_language": "auto",
         "prompt_head": None,
-        "prompt_tail": PROMPT_TAIL,
+        "prompt_tail": None,
+        "prompt_head_by_language": {"en": None, "cn": None},
+        "prompt_tail_by_language": {"en": None, "cn": None},
         "timeout_sec": float(args.timeout_sec),
         "task_target_output_dir": "model_output",
         "task_parallel": task_parallel,

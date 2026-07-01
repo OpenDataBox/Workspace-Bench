@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict
 
@@ -129,6 +130,68 @@ def _normalize_language(language: str) -> str:
     return LANGUAGE_ALIASES[key]
 
 
+def _normalize_language_value(value: Any) -> str | None:
+    key = str(value or "").strip().lower()
+    if not key:
+        return None
+    return LANGUAGE_ALIASES.get(key)
+
+
+def _is_cjk(ch: str) -> bool:
+    code = ord(ch)
+    return (
+        0x3400 <= code <= 0x4DBF
+        or 0x4E00 <= code <= 0x9FFF
+        or 0xF900 <= code <= 0xFAFF
+        or 0x20000 <= code <= 0x2A6DF
+        or 0x2A700 <= code <= 0x2B73F
+        or 0x2B740 <= code <= 0x2B81F
+        or 0x2B820 <= code <= 0x2CEAF
+    )
+
+
+def _flatten_language_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        out: list[str] = []
+        for item in value:
+            out.extend(_flatten_language_values(item))
+        return out
+    if isinstance(value, dict):
+        out: list[str] = []
+        for item in value.values():
+            out.extend(_flatten_language_values(item))
+        return out
+    return []
+
+
+def _detect_language_from_text(*values: Any) -> str:
+    text = "\n".join(part for value in values for part in _flatten_language_values(value))
+    cjk = 0
+    latin = 0
+    for ch in text:
+        if _is_cjk(ch):
+            cjk += 1
+        elif ("a" <= ch <= "z") or ("A" <= ch <= "Z"):
+            latin += 1
+    denom = cjk + latin
+    if cjk >= 8 and denom > 0 and (cjk / denom) >= 0.08:
+        return "cn"
+    return "en"
+
+
+def _detect_language_from_task_meta(meta: Dict[str, Any]) -> str:
+    return _detect_language_from_text(meta.get("task"), meta.get("rubrics"), meta.get("rubric_types"))
+
+
+def _warn_language(task_id: str | None, message: str) -> None:
+    prefix = f" task={task_id}" if task_id else ""
+    print(f"[warning]{prefix} {message}", file=sys.stderr)
+
+
 def _safe_task_id(row: Dict[str, str]) -> str:
     if row.get("id"):
         return str(row["id"]).strip()
@@ -137,7 +200,7 @@ def _safe_task_id(row: Dict[str, str]) -> str:
     return f"{persona}_{absolute_id}" if absolute_id else persona
 
 
-def _materialize_csv(csv_path: Path, dst: Path) -> int:
+def _materialize_csv(csv_path: Path, dst: Path, expected_language: str | None = None) -> int:
     count = 0
     with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
@@ -151,7 +214,7 @@ def _materialize_csv(csv_path: Path, dst: Path) -> int:
                 parsed = _load_jsonish(value)
                 if parsed not in ("", None):
                     meta[key] = parsed
-            _normalize_task_meta(meta, task_id=task_id)
+            _normalize_task_meta(meta, task_id=task_id, expected_language=expected_language)
             if "output_files" not in meta and "output_file" in meta:
                 meta["output_files"] = [meta["output_file"]]
 
@@ -165,7 +228,11 @@ def _materialize_csv(csv_path: Path, dst: Path) -> int:
     return count
 
 
-def _normalize_task_meta(meta: Dict[str, Any], task_id: str | None = None) -> Dict[str, Any]:
+def _normalize_task_meta(
+    meta: Dict[str, Any],
+    task_id: str | None = None,
+    expected_language: str | None = None,
+) -> Dict[str, Any]:
     if task_id:
         meta.setdefault("id", task_id)
     elif not meta.get("id"):
@@ -181,10 +248,36 @@ def _normalize_task_meta(meta: Dict[str, Any], task_id: str | None = None) -> Di
         meta.setdefault("user_profit", normalized_fs)
     if persona:
         meta.setdefault("job", persona)
+
+    detected_language = _detect_language_from_task_meta(meta)
+    raw_language = meta.get("language")
+    normalized_language = _normalize_language_value(raw_language)
+    if raw_language not in (None, "") and normalized_language is None:
+        valid = ", ".join(sorted(LANGUAGE_ALIASES))
+        raise SystemExit(f"unsupported metadata language: {raw_language!r}; choose one of: {valid}")
+
+    task_label = str(meta.get("id") or task_id or "").strip() or None
+    if normalized_language:
+        meta["language"] = normalized_language
+        if detected_language != normalized_language:
+            _warn_language(
+                task_label,
+                f"metadata language {normalized_language!r} conflicts with content-detected {detected_language!r}; keeping metadata language",
+            )
+    else:
+        meta["language"] = detected_language
+
+    if expected_language is not None:
+        expected = _normalize_language(expected_language)
+        if meta["language"] != expected:
+            _warn_language(
+                task_label,
+                f"metadata language {meta['language']!r} differs from expected download language {expected!r}",
+            )
     return meta
 
 
-def _normalize_task_metadata_files(dst: Path) -> int:
+def _normalize_task_metadata_files(dst: Path, expected_language: str | None = None) -> int:
     count = 0
     for meta_path in sorted(dst.glob("*/metadata.json")):
         try:
@@ -194,7 +287,7 @@ def _normalize_task_metadata_files(dst: Path) -> int:
         if not isinstance(meta, dict):
             continue
         before = json.dumps(meta, ensure_ascii=False, sort_keys=True)
-        _normalize_task_meta(meta, task_id=meta_path.parent.name)
+        _normalize_task_meta(meta, task_id=meta_path.parent.name, expected_language=expected_language)
         after = json.dumps(meta, ensure_ascii=False, sort_keys=True)
         if after != before:
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -422,7 +515,7 @@ def download_tasks(
                 shutil.copytree(child, target)
             else:
                 shutil.copy2(child, target)
-        count = _normalize_task_metadata_files(dst)
+        count = _normalize_task_metadata_files(dst, expected_language=language)
         _write_language_marker(dst, language)
         print(f"[ok] downloaded {count} {language} {kind} task directories to {dst}")
         return
@@ -431,7 +524,7 @@ def download_tasks(
     csv_path = preferred_csv if preferred_csv.is_file() else _find_csv(snapshot)
     if not csv_path:
         raise SystemExit(f"No task directories or CSV file found in {snapshot}")
-    count = _materialize_csv(csv_path, dst)
+    count = _materialize_csv(csv_path, dst, expected_language=language)
     _write_language_marker(dst, language)
     print(f"[ok] materialized {count} {language} {kind} metadata files under {dst}")
 

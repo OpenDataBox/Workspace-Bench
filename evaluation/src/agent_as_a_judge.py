@@ -22,6 +22,118 @@ from agents import claudecode as _claudecode
 
 Json = Any
 
+LANGUAGE_ALIASES = {
+    "en": "en",
+    "cn": "cn",
+    "zh": "cn",
+}
+
+
+def _normalize_language_value(value: Json) -> Optional[str]:
+    key = str(value or "").strip().lower()
+    if not key:
+        return None
+    return LANGUAGE_ALIASES.get(key)
+
+
+def _is_cjk(ch: str) -> bool:
+    code = ord(ch)
+    return (
+        0x3400 <= code <= 0x4DBF
+        or 0x4E00 <= code <= 0x9FFF
+        or 0xF900 <= code <= 0xFAFF
+        or 0x20000 <= code <= 0x2A6DF
+        or 0x2A700 <= code <= 0x2B73F
+        or 0x2B740 <= code <= 0x2B81F
+        or 0x2B820 <= code <= 0x2CEAF
+    )
+
+
+def _flatten_language_values(value: Json) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        out: List[str] = []
+        for item in value:
+            out.extend(_flatten_language_values(item))
+        return out
+    if isinstance(value, dict):
+        out: List[str] = []
+        for item in value.values():
+            out.extend(_flatten_language_values(item))
+        return out
+    return []
+
+
+def _detect_language_from_text(*values: Json) -> str:
+    text = "\n".join(part for value in values for part in _flatten_language_values(value))
+    cjk = 0
+    latin = 0
+    for ch in text:
+        if _is_cjk(ch):
+            cjk += 1
+        elif ("a" <= ch <= "z") or ("A" <= ch <= "Z"):
+            latin += 1
+    denom = cjk + latin
+    if cjk >= 8 and denom > 0 and (cjk / denom) >= 0.08:
+        return "cn"
+    return "en"
+
+
+def _language_signal_present(*values: Json) -> bool:
+    text = "\n".join(part for value in values for part in _flatten_language_values(value))
+    return any(_is_cjk(ch) or ("a" <= ch <= "z") or ("A" <= ch <= "Z") for ch in text)
+
+
+def _language_warning(task_id: Json, message: str) -> str:
+    prefix = f"task {task_id}: " if task_id else ""
+    return f"[language-warning] {prefix}{message}"
+
+
+def _resolve_language_info(meta: Dict[str, Json]) -> Dict[str, Json]:
+    values = [meta.get("task"), meta.get("rubrics"), meta.get("rubric_types")]
+    detected = _detect_language_from_text(*values)
+    has_signal = _language_signal_present(*values)
+    raw_meta_language = meta.get("language")
+    meta_language = _normalize_language_value(raw_meta_language)
+    task_id = meta.get("id")
+
+    if raw_meta_language not in (None, "") and meta_language is None:
+        warning = _language_warning(
+            task_id,
+            f"unsupported metadata language {raw_meta_language!r}; falling back to content detection",
+        )
+        return {
+            "language": detected if has_signal else "en",
+            "source": "detected" if has_signal else "default",
+            "warning": warning,
+        }
+
+    if meta_language:
+        warning = None
+        if has_signal and detected != meta_language:
+            warning = _language_warning(
+                task_id,
+                f"metadata language {meta_language!r} conflicts with content-detected {detected!r}; using metadata",
+            )
+        return {"language": meta_language, "source": "metadata", "warning": warning}
+
+    if has_signal:
+        return {"language": detected, "source": "detected", "warning": None}
+    return {"language": "en", "source": "default", "warning": None}
+
+
+def _infer_language_from_meta(meta: Dict[str, Json]) -> str:
+    return str(_resolve_language_info(meta).get("language") or "en")
+
+
+def _judge_system_prompt(language: str) -> str:
+    if (_normalize_language_value(language) or "en") == "cn":
+        return "你是一个严格的任务评测员。"
+    return "You are a strict task evaluator."
+
 
 def _iso_now() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
@@ -166,6 +278,8 @@ def _prepare_judge_view(*, sandbox_try_dir: str, task_dir: str, meta: Dict[str, 
                 "task": meta.get("task"),
                 "steps": meta.get("steps"),
                 "rubrics": meta.get("rubrics"),
+                "rubric_types": meta.get("rubric_types"),
+                "language": meta.get("language"),
                 "output_files": meta.get("output_files"),
                 "data": meta.get("data"),
                 "data_manifest": meta.get("data_manifest"),
@@ -207,6 +321,7 @@ def _build_judge_prompt(
     task_dir: str,
     meta: Dict[str, Json],
     judge_view: Dict[str, str],
+    language: str,
 ) -> str:
     """
     Prompt the ClaudeCode agent to do filesystem-heavy evaluation and emit only JSON.
@@ -215,6 +330,42 @@ def _build_judge_prompt(
     steps = meta.get("steps")
     task = meta.get("task")
     data = meta.get("data")
+
+    language = _normalize_language_value(language) or "en"
+    if language == "cn":
+        instructions = [
+            "你是一个严格的任务评测员（agent-as-a-judge）。",
+            "你当前真正可访问的工作目录是 judgeView.cwd，而不是 task JSON 里的系统绝对路径。",
+            "为了避免误看 ground truth，judgeView 里只暴露了允许评估的内容：inputs/（原始输入文件）、candidate_output/（待评估输出目录，如果存在）。",
+            "禁止把原始任务目录里的 output/output_cc/gt 等目录当成答案来源；本次只允许评估 judgeView.candidateOutputPath 中的结果。",
+            "inputs/ 仅用于查看原始输入文件和理解任务，不是标准答案目录。",
+            "只能基于你实际检查到的文件/目录/文件内容给出判断，不要凭空假设。",
+            "你需要自己决定要检查的具体路径（例如用 ls/find/grep 等），并在 evidence 中写明你检查的路径与观察到的现象。",
+            "最终只输出一个 JSON 对象，格式必须为："
+            "{ \"rubrics\": [ {\"index\":0,\"passed\":true,\"confidence\":0.8,\"evidence\":\"...\"}, ... ] }",
+            "如果证据不足：passed=false，evidence 写清楚缺什么证据。",
+        ]
+        prefix = (
+            "请基于以下输入 JSON 完成 rubrics 评估。\n"
+            "注意：最后一行开始请只输出 JSON 对象，不要输出其他文字。\n\n"
+        )
+    else:
+        instructions = [
+            "You are a strict task evaluator (agent-as-a-judge).",
+            "Your actual accessible working directory is judgeView.cwd, not any absolute system path in the task JSON.",
+            "To avoid seeing ground truth, judgeView exposes only approved evaluation content: inputs/ (original input files) and candidate_output/ (candidate outputs, if present).",
+            "Do not use output/output_cc/gt or similar directories from the original task directory as answer sources; evaluate only judgeView.candidateOutputPath for this run.",
+            "inputs/ is only for inspecting original input files and understanding the task; it is not a ground-truth answer directory.",
+            "Base judgments only on files, directories, and contents you actually inspect; do not assume facts.",
+            "Decide which paths to inspect yourself (for example with ls/find/grep), and in evidence state the checked paths and observed facts.",
+            "Output only one JSON object in this exact shape: "
+            "{ \"rubrics\": [ {\"index\":0,\"passed\":true,\"confidence\":0.8,\"evidence\":\"...\"}, ... ] }",
+            "If evidence is insufficient: passed=false and explain what evidence is missing.",
+        ]
+        prefix = (
+            "Evaluate the rubrics using the input JSON below.\n"
+            "Important: starting on the final line, output only the JSON object with no other text.\n\n"
+        )
 
     # Keep prompt concise but actionable to reduce token usage (ClaudeCode will inspect by tools/CLI).
     payload = {
@@ -230,24 +381,9 @@ def _build_judge_prompt(
             "originalTaskMetadataPath": judge_view.get("original_task_metadata_path"),
             "candidateOutputPath": judge_view.get("candidate_output_path"),
         },
-        "instructions": [
-            "你是一个严格的任务评测员（agent-as-a-judge）。",
-            "你当前真正可访问的工作目录是 judgeView.cwd，而不是 task JSON 里的系统绝对路径。",
-            "为了避免误看 ground truth，judgeView 里只暴露了允许评估的内容：inputs/（原始输入文件）、candidate_output/（待评估输出目录，如果存在）。",
-            "禁止把原始任务目录里的 output/output_cc/gt 等目录当成答案来源；本次只允许评估 judgeView.candidateOutputPath 中的结果。",
-            "inputs/ 仅用于查看原始输入文件和理解任务，不是标准答案目录。",
-            "只能基于你实际检查到的文件/目录/文件内容给出判断，不要凭空假设。",
-            "你需要自己决定要检查的具体路径（例如用 ls/find/grep 等），并在 evidence 中写明你检查的路径与观察到的现象。",
-            "最终只输出一个 JSON 对象，格式必须为："
-            "{ \"rubrics\": [ {\"index\":0,\"passed\":true,\"confidence\":0.8,\"evidence\":\"...\"}, ... ] }",
-            "如果证据不足：passed=false，evidence 写清楚缺什么证据。",
-        ],
+        "instructions": instructions,
     }
-    return (
-        "请基于以下输入 JSON 完成 rubrics 评估。\n"
-        "注意：最后一行开始请只输出 JSON 对象，不要输出其他文字。\n\n"
-        + json.dumps(payload, ensure_ascii=False, indent=2)
-    )
+    return prefix + json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def evaluate_task(
@@ -298,6 +434,12 @@ def evaluate_task(
     if not isinstance(rubrics, list) or not rubrics:
         return {"error": "No rubrics found in metadata", "success": False, "taskId": task_id}
 
+    language_info = _resolve_language_info(meta)
+    language = str(language_info.get("language") or "en")
+    language_warning = language_info.get("warning")
+    if isinstance(language_warning, str) and language_warning:
+        print(language_warning, flush=True)
+
     rubrics_out_path = os.path.join(task_dir, f"rubrics_judge--{model_name}.json")
     dep_graph_out_path = os.path.join(task_dir, f"dependency_graph--{model_name}.json")
 
@@ -312,7 +454,7 @@ def evaluate_task(
     if not overwrite and os.path.exists(rubrics_out_path):
         result["rubricsSkipped"] = True
     else:
-        sys_prompt = "你是一个严格的任务评测员。"
+        sys_prompt = _judge_system_prompt(language)
 
         # Use a dedicated sandbox under task_dir/raw to keep judge artifacts nearby.
         sandbox_dir = os.path.join(task_dir, "raw", "agent_as_a_judge")
@@ -346,6 +488,7 @@ def evaluate_task(
                 task_dir=task_dir,
                 meta=meta,
                 judge_view=judge_view,
+                language=language,
             )
             run_out = _claudecode.run(
                 prompt=sys_prompt + "\n\n" + prompt,
@@ -427,6 +570,9 @@ def evaluate_task(
                     "user": _truncate_str(prompt, 4000),
                     "userPromptSizeBytes": len(str(prompt).encode("utf-8")),
                     "userPromptSizeChars": len(str(prompt)),
+                    "language": language,
+                    "languageSource": language_info.get("source") or "default",
+                    **({"languageDetectionWarning": language_warning} if isinstance(language_warning, str) and language_warning else {}),
                 },
             },
         )
