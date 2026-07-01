@@ -36,6 +36,9 @@
 <br />
 
 ## 📰 News
+* **[July 02, 2026]**: Workspace-Bench-Lite metadata was updated with task language fields, file fixes, and refined rubrics ([huggingface](https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench-Lite)).
+* **[July 02, 2026]**: The runner now supports task-level parallelism and more robust output collection.
+* **[July 02, 2026]**: Task language is now detected automatically to inject English or Chinese prompts.
 * **[June 23, 2025]**: The Chinese Version full datasets of Version 1.0 are released ([homepage](https://workspace-bench.github.io/), [huggingface](https://huggingface.co/Workspace-Bench))!
 * **[May 07, 2025]**: The full datasets of Version 1.0 are released ([homepage](https://workspace-bench.github.io/), [huggingface](https://huggingface.co/Workspace-Bench))!
 
