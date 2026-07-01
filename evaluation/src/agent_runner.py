@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import time
 import traceback
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,6 +31,23 @@ def _ensure_import_path() -> None:
 
 def _ensure_dir(p: str) -> None:
     os.makedirs(p, exist_ok=True)
+
+
+def _rmtree_retry(path: str, *, attempts: int = 5) -> None:
+    last_error: Optional[BaseException] = None
+    for attempt in range(max(1, attempts)):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as e:
+            last_error = e
+            if attempt + 1 >= attempts:
+                break
+            time.sleep(0.2 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
 
 
 def _read_json(path: str) -> Json:
@@ -315,6 +333,140 @@ def _resolve_under(root: str, p: str) -> str:
     return abs_p
 
 
+def _clean_target_output_dir(*, work_dir: str, task_target_output_dir: str) -> None:
+    rel = _normalize_rel_path(task_target_output_dir)
+    if not rel:
+        return
+    target = os.path.abspath(os.path.join(work_dir, rel))
+    work_abs = os.path.abspath(work_dir)
+    if target == work_abs or not target.startswith(work_abs + os.sep):
+        raise ValueError("target output dir escapes work dir")
+    if os.path.isdir(target):
+        _rmtree_retry(target)
+    elif os.path.exists(target):
+        os.unlink(target)
+    _ensure_dir(target)
+
+
+OUTPUT_DIFF_DIR = "_misplaced_outputs"
+
+
+def _target_output_root(work_dir: str, task_target_output_dir: str) -> str:
+    rel = _normalize_rel_path(task_target_output_dir)
+    return os.path.abspath(os.path.join(work_dir, rel)) if rel else os.path.abspath(work_dir)
+
+
+def _is_under(path: str, root: str) -> bool:
+    path_abs = os.path.abspath(path)
+    root_abs = os.path.abspath(root)
+    return path_abs == root_abs or path_abs.startswith(root_abs + os.sep)
+
+
+def _snapshot_work_dir_files(*, work_dir: str, task_target_output_dir: str) -> Dict[str, Tuple[int, float]]:
+    work_abs = os.path.abspath(work_dir)
+    target_abs = _target_output_root(work_dir, task_target_output_dir)
+    skipped_dir_names = {
+        "model_output",
+        ".workspace_data",
+        ".git",
+        ".cache",
+        "__pycache__",
+        "node_modules",
+    }
+    out: Dict[str, Tuple[int, float]] = {}
+    for dirpath, dirnames, filenames in os.walk(work_abs):
+        dir_abs = os.path.abspath(dirpath)
+        if _is_under(dir_abs, target_abs):
+            dirnames[:] = []
+            continue
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in skipped_dir_names and not d.startswith(".")
+        ]
+        for fn in filenames:
+            path = os.path.abspath(os.path.join(dir_abs, fn))
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue
+            rel = os.path.relpath(path, work_abs).replace("\\", "/")
+            out[rel] = (int(st.st_size), float(st.st_mtime))
+    return out
+
+
+def _should_mirror_workdir_file(path: str, *, expected_names: Optional[set] = None) -> bool:
+    name = os.path.basename(path)
+    if not name:
+        return False
+    if expected_names and name in expected_names:
+        return True
+    if name.startswith("."):
+        return False
+    lowered = name.lower()
+    if lowered.endswith((".tmp", ".bak", ".log", ".trace", "~")):
+        return False
+    if lowered in {"agent.json", "metadata.json", "manifest.json", "trace.json", "trace.txt"}:
+        return False
+    if re.match(r"^(build|gen|generate|tmp|debug|scratch)[-_].*\.py$", lowered):
+        return False
+    return True
+
+
+def _copy_misplaced_outputs_to_target(
+    *,
+    work_dir: str,
+    task_target_output_dir: str,
+    before: Dict[str, Tuple[int, float]],
+    min_mtime: float,
+    raw_dir: str,
+    expected_files: List[str],
+) -> List[Dict[str, Json]]:
+    work_abs = os.path.abspath(work_dir)
+    target_abs = _target_output_root(work_dir, task_target_output_dir)
+    if target_abs == work_abs:
+        _write_json(os.path.join(raw_dir, "misplaced_outputs.json"), [])
+        return []
+
+    after = _snapshot_work_dir_files(work_dir=work_dir, task_target_output_dir=task_target_output_dir)
+    misplaced: List[Dict[str, Json]] = []
+    misplaced_root = os.path.join(target_abs, OUTPUT_DIFF_DIR)
+    expected_names = {os.path.basename(x) for x in expected_files if isinstance(x, str) and x}
+
+    for rel, state in sorted(after.items()):
+        src = os.path.abspath(os.path.join(work_abs, rel))
+        if not os.path.isfile(src) or not _should_mirror_workdir_file(src, expected_names=expected_names):
+            continue
+        prev = before.get(rel)
+        changed = prev is None or prev[0] != state[0] or abs(prev[1] - state[1]) > 1e-6
+        if not changed:
+            continue
+        if prev is not None and state[1] < min_mtime:
+            continue
+
+        safe_rel = _normalize_rel_path(rel)
+        if not safe_rel:
+            continue
+        dst = os.path.abspath(os.path.join(misplaced_root, safe_rel))
+        if not _is_under(dst, misplaced_root):
+            continue
+        if os.path.abspath(dst) == os.path.abspath(src):
+            continue
+        _ensure_dir(os.path.dirname(dst))
+        shutil.copy2(src, dst)
+        misplaced.append(
+            {
+                "sourcePath": safe_rel,
+                "targetPath": os.path.relpath(dst, target_abs).replace("\\", "/"),
+                "reason": "new" if prev is None else "modified",
+                "sizeBytes": int(state[0]),
+            }
+        )
+
+    _write_json(os.path.join(raw_dir, "misplaced_outputs.json"), misplaced)
+    return misplaced
+
+
 def _collect_output_paths(
     *,
     task_target_output_dir: str,
@@ -323,21 +475,55 @@ def _collect_output_paths(
     returned_paths: List[str],
     last_text: str,
     min_mtime: Optional[float],
-) -> Tuple[List[str], str]:
+) -> Tuple[List[str], List[str]]:
     out: List[str] = []
     retrieval_method = []
+    skipped_output_names = {
+        "trace.txt",
+        "trace.json",
+        "phase1_file_discovery.md",
+        "phase1_files.json",
+        "phase2_data_summary.md",
+    }
+    expected_name_set = {os.path.basename(x) for x in expected_files}
+
+    def prefer_target_output_matches(paths: List[str]) -> List[str]:
+        if task_target_output_dir == "":
+            return paths
+        target_abs = _target_output_root(work_dir, task_target_output_dir)
+        by_name: Dict[str, List[str]] = {}
+        for p in paths:
+            by_name.setdefault(os.path.basename(p), []).append(p)
+        out_paths: List[str] = []
+        for name in sorted(by_name):
+            candidates = by_name[name]
+            target_candidates = [p for p in candidates if _is_under(p, target_abs)]
+            out_paths.extend(target_candidates or candidates)
+        return sorted(set(out_paths))
+
+    def is_internal_output_name(name: str) -> bool:
+        if name in skipped_output_names:
+            return True
+        if name in expected_name_set:
+            return False
+        lowered = name.lower()
+        if lowered.endswith(".bak") or lowered.endswith("~"):
+            return True
+        return bool(re.match(r"^(build|gen|generate|tmp|debug|scratch)[-_].*\.py$", lowered))
+
     for rp in _parse_python_list_paths(last_text):
         try:
             ap = _resolve_under(work_dir, rp)
         except Exception:
             continue
-        if os.path.isfile(ap):
+        if os.path.isfile(ap) and not is_internal_output_name(os.path.basename(ap)):
             out.append(ap)
     if out:
         retrieval_method.append("last_text_paths")
         # return (sorted(set(out)), "last_text_paths")
 
     found = _find_by_fullname(work_dir, expected_files)
+    found = prefer_target_output_matches(found)
     # picked = _pick_recent_by_basename(found, min_mtime=min_mtime)
     if found:
         retrieval_method.append("expected_filenames_recent")
@@ -352,7 +538,7 @@ def _collect_output_paths(
             ap = _resolve_under(work_dir, p)
         except Exception:
             continue
-        if os.path.isfile(ap):
+        if os.path.isfile(ap) and not is_internal_output_name(os.path.basename(ap)):
             found2.append(ap)
     # picked2 = _pick_recent_by_basename(out, min_mtime=min_mtime)
     if found2:
@@ -366,6 +552,8 @@ def _collect_output_paths(
         for root, dirs, files in os.walk(os.path.join(work_dir, task_target_output_dir)):
             # print(files)
             for file in files:
+                if is_internal_output_name(file):
+                    continue
                 file_path = os.path.abspath(os.path.join(root, file))
                 found3.append(file_path)
         if found3:
@@ -386,25 +574,53 @@ def _read_text_limited(path: str, *, limit: int = 200000) -> Optional[str]:
         return None
 
 
-def _copy_outputs(*, output_paths: List[str], out_dir: str) -> List[Dict[str, Json]]:
+def _output_relpath(src: str, *, preserve_root: Optional[str]) -> str:
+    if preserve_root:
+        try:
+            rel = os.path.relpath(os.path.abspath(src), os.path.abspath(preserve_root)).replace("\\", "/")
+            if rel != ".." and not rel.startswith("../"):
+                rel = _normalize_rel_path(rel)
+                if rel:
+                    return rel
+        except Exception:
+            pass
+    return os.path.basename(src) or "output"
+
+
+def _copy_outputs(*, output_paths: List[str], out_dir: str, preserve_root: Optional[str] = None) -> List[Dict[str, Json]]:
     _ensure_dir(out_dir)
     manifest: List[Dict[str, Json]] = []
-    for src in output_paths:
+    preserve_abs = os.path.abspath(preserve_root) if preserve_root else ""
+
+    def output_priority(src: str) -> Tuple[int, str]:
+        src_abs = os.path.abspath(src)
+        if preserve_abs and (src_abs == preserve_abs or src_abs.startswith(preserve_abs + os.sep)):
+            return (0, src_abs)
+        return (1, src_abs)
+
+    for src in sorted(output_paths, key=output_priority):
         if not src or not os.path.isfile(src):
             continue
-        base = os.path.basename(src) or "output"
-        dst = os.path.join(out_dir, base)
+        rel = _output_relpath(src, preserve_root=preserve_root)
+        dst = os.path.abspath(os.path.join(out_dir, rel))
+        out_abs = os.path.abspath(out_dir)
+        if dst != out_abs and not dst.startswith(out_abs + os.sep):
+            rel = os.path.basename(src) or "output"
+            dst = os.path.join(out_abs, rel)
         if os.path.abspath(dst) == os.path.abspath(src):
             continue
         if os.path.exists(dst):
             i = 1
+            rel_dir = os.path.dirname(rel)
+            base = os.path.basename(rel)
             b, ext = os.path.splitext(base)
             while os.path.exists(dst):
-                dst = os.path.join(out_dir, f"{b}_{i}{ext}")
+                dst = os.path.join(out_abs, rel_dir, f"{b}_{i}{ext}")
                 i += 1
+        _ensure_dir(os.path.dirname(dst))
         shutil.copy2(src, dst)
         manifest.append(
-            {"sourcePath": os.path.basename(src), "outputPath": os.path.relpath(dst, out_dir), "sizeBytes": os.path.getsize(dst)}
+            {"sourcePath": rel, "outputPath": os.path.relpath(dst, out_dir).replace("\\", "/"), "sizeBytes": os.path.getsize(dst)}
         )
     return manifest
 
@@ -446,6 +662,96 @@ def _as_bool(value: Json, *, default: bool) -> bool:
     return default
 
 
+def _as_int(value: Json, *, default: int, minimum: int = 1) -> int:
+    try:
+        out = int(value)
+    except Exception:
+        out = int(default)
+    return max(int(minimum), out)
+
+
+def _cleanup_policy(value: Json) -> str:
+    s = str(value or "failed").strip().lower()
+    if s in {"failed", "failure", "failures"}:
+        return "failed"
+    if s in {"always", "all", "true", "1"}:
+        return "always"
+    if s in {"never", "none", "false", "0"}:
+        return "never"
+    return "failed"
+
+
+def _map_value_for_meta(meta: Dict[str, Json], mapping: Dict[str, str]) -> str:
+    fs = str(meta.get("file_system") or "*")
+    if fs in mapping:
+        return str(mapping.get(fs) or "")
+    return str(mapping.get("*") or "")
+
+
+def _copytree_fast(src: str, dst: str) -> Dict[str, Json]:
+    started = time.time()
+    method = "cp-reflink-auto"
+    error = None
+    try:
+        _ensure_dir(dst)
+        proc = subprocess.run(
+            ["cp", "-a", "--reflink=auto", os.path.join(src, "."), dst],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=3600,
+        )
+        if proc.returncode == 0:
+            return {"method": method, "durationMs": int((time.time() - started) * 1000)}
+        error = (proc.stderr or proc.stdout or "").strip()[:1000]
+    except Exception as e:
+        error = f"{type(e).__name__}: {e}"
+
+    if os.path.exists(dst):
+        _rmtree_retry(dst)
+    fallback_started = time.time()
+    shutil.copytree(src, dst)
+    return {
+        "method": "shutil.copytree",
+        "durationMs": int((time.time() - started) * 1000),
+        "fallbackDurationMs": int((time.time() - fallback_started) * 1000),
+        "fallbackFrom": method,
+        "fallbackError": error,
+    }
+
+
+def _prepare_isolated_work_dir(*, case_dir: str, meta: Dict[str, Json], standard_work_dir_map: Dict[str, str]) -> Tuple[str, Dict[str, Json]]:
+    standard_work_dir = _map_value_for_meta(meta, {str(k): str(v) for k, v in standard_work_dir_map.items()})
+    if not standard_work_dir:
+        raise RuntimeError("cannot resolve standard work dir")
+    if not os.path.isdir(standard_work_dir):
+        raise FileNotFoundError(f"standard work dir not found: {standard_work_dir}")
+
+    work_dir = os.path.join(case_dir, "workdir")
+    if os.path.exists(work_dir):
+        _rmtree_retry(work_dir)
+    copy_info = _copytree_fast(standard_work_dir, work_dir)
+    copy_info["source"] = os.path.abspath(standard_work_dir)
+    copy_info["destination"] = os.path.abspath(work_dir)
+    return work_dir, copy_info
+
+
+def _cleanup_isolated_work_dir(*, work_dir: str, final_status: str, policy: str) -> bool:
+    if not work_dir or not os.path.isdir(work_dir):
+        return False
+    should_remove = False
+    if policy == "always":
+        should_remove = True
+    elif policy == "failed" and final_status == "passed":
+        should_remove = True
+    elif policy == "never":
+        should_remove = False
+    if should_remove:
+        _rmtree_retry(work_dir)
+        return False
+    return True
+
+
 def _group_metas_by_file_system(metas: List[Dict[str, Json]]) -> Dict[str, List[Tuple[int, Dict[str, Json]]]]:
     grouped: Dict[str, List[Tuple[int, Dict[str, Json]]]] = {}
     for idx, meta in enumerate(metas):
@@ -471,6 +777,8 @@ def _run_one_case(
     standard_work_dir_map: Dict[str, str],
     agent_name: str,
     model_name: str,
+    isolated_workdir: bool,
+    task_workdir_cleanup: str,
 ) -> Dict[str, Json]:
     print(f"run task: {meta.get('id') or ''}")
     summary = _new_summary()
@@ -515,17 +823,36 @@ def _run_one_case(
             },
         }
     elif os.path.exists(case_dir):
-        shutil.rmtree(case_dir)
+        _rmtree_retry(case_dir)
     _ensure_dir(case_dir)
 
     _write_json(os.path.join(case_dir, "metadata.json"), meta)
 
-    work_dir = _resolve_work_dir(meta, {str(k): str(v) for k, v in work_dir_map.items()})
-    if not work_dir:
+    shared_work_dir = _resolve_work_dir(meta, {str(k): str(v) for k, v in work_dir_map.items()})
+    if not shared_work_dir:
         raise RuntimeError("cannot resolve work dir")
+    workdir_copy_info: Dict[str, Json] = {}
+    if isolated_workdir:
+        work_dir, workdir_copy_info = _prepare_isolated_work_dir(
+            case_dir=case_dir,
+            meta=meta,
+            standard_work_dir_map=standard_work_dir_map,
+        )
+    else:
+        work_dir = shared_work_dir
     _ensure_dir(work_dir)
 
     _copy_from_manifest(meta, work_dir=work_dir)
+    _clean_target_output_dir(work_dir=work_dir, task_target_output_dir=task_target_output_dir)
+    expected_files = _expected_output_files(meta)
+
+    raw_dir = os.path.join(case_dir, "raw")
+    _ensure_dir(raw_dir)
+
+    output_diff_before = _snapshot_work_dir_files(
+        work_dir=work_dir,
+        task_target_output_dir=task_target_output_dir,
+    )
 
     prompt = _wrap_prompt(
         prompt=str(meta.get("task") or ""),
@@ -534,10 +861,6 @@ def _run_one_case(
         prompt_tail=prompt_tail,
         task_target_output_dir=task_target_output_dir,
     )
-    expected_files = _expected_output_files(meta)
-
-    raw_dir = os.path.join(case_dir, "raw")
-    _ensure_dir(raw_dir)
 
     case_started = time.time()
     api_provider2 = dict(api_provider) if isinstance(api_provider, dict) else {}
@@ -571,37 +894,72 @@ def _run_one_case(
     trace_obj = run_res.get("trace") if isinstance(run_res.get("trace"), dict) else {}
     last_text = str(trace_obj.get("lastText")) if isinstance(trace_obj.get("lastText"), str) else ""
 
+    misplaced_outputs = _copy_misplaced_outputs_to_target(
+        work_dir=work_dir,
+        task_target_output_dir=task_target_output_dir,
+        before=output_diff_before,
+        min_mtime=case_started - 1.0,
+        raw_dir=raw_dir,
+        expected_files=expected_files,
+    )
+
+    output_paths, retrieval_method = _collect_output_paths(
+        work_dir=work_dir,
+        expected_files=expected_files,
+        task_target_output_dir=task_target_output_dir,
+        returned_paths=returned_paths_rel,
+        last_text=last_text,
+        min_mtime=case_started - 1.0,
+    )
+    if misplaced_outputs:
+        retrieval_method = list(retrieval_method) + ["misplaced_output_diff"]
     if status_raw != "ok":
-        output_paths, retrieval_method = ([], "skipped")
-        manifest = []
-    else:
-        output_paths, retrieval_method = _collect_output_paths(
-            work_dir=work_dir,
-            expected_files=expected_files,
-            task_target_output_dir=task_target_output_dir,
-            returned_paths=returned_paths_rel,
-            last_text=last_text,
-            min_mtime=case_started - 1.0,
-        )
-        manifest = _copy_outputs(output_paths=output_paths, out_dir=os.path.join(case_dir, "output"))
+        if output_paths:
+            retrieval_method = list(retrieval_method) + [f"partial_due_to_status:{status_raw}"]
+        else:
+            retrieval_method = ["skipped", f"status:{status_raw}"]
+
+    preserve_root = (
+        os.path.join(work_dir, task_target_output_dir)
+        if task_target_output_dir != ""
+        else work_dir
+    )
+    manifest = _copy_outputs(
+        output_paths=output_paths,
+        out_dir=os.path.join(case_dir, "output"),
+        preserve_root=preserve_root,
+    )
 
     checks = []
     if status_raw != "ok":
-        checks.append({"type": "returned_paths_exist", "passed": False, "detail": f"skipped_due_to_status:{status_raw}"})
+        checks.append(
+            {
+                "type": "returned_paths_exist",
+                "passed": bool(output_paths),
+                "detail": {
+                    "status": status_raw,
+                    "count": len(output_paths),
+                    "partialOutputCollected": bool(output_paths),
+                },
+            }
+        )
     elif output_paths:
         checks.append({"type": "returned_paths_exist", "passed": True, "detail": {"count": len(output_paths)}})
     else:
         checks.append({"type": "returned_paths_exist", "passed": False, "detail": "Agent returned empty path list"})
 
-    if status_raw == "timeout":
+    if output_paths:
+        final_status = "passed"
+        summary["passed"] += 1
+    elif status_raw == "timeout":
         final_status = "timeout"
         summary["timeout"] += 1
     elif status_raw == "error":
         final_status = "error"
         summary["error"] += 1
     else:
-        final_status = "passed" if output_paths else "failed"
-        summary["passed" if output_paths else "failed"] += 1
+        final_status = "failed"
+        summary["failed"] += 1
 
     metrics_obj = run_res.get("metrics") if isinstance(run_res.get("metrics"), dict) else {}
     turns = metrics_obj.get("turns") if isinstance(metrics_obj.get("turns"), int) else None
@@ -619,12 +977,20 @@ def _run_one_case(
     with open(os.path.join(case_dir, "agent.log"), "w", encoding="utf-8") as f:
         f.write(f"agent={agent_name} model={model_name}\n")
         f.write(f"workDir={os.path.abspath(work_dir)}\n")
+        if workdir_copy_info:
+            f.write(
+                "workDirCopy="
+                f"{workdir_copy_info.get('method')} "
+                f"durationMs={workdir_copy_info.get('durationMs')}\n"
+            )
         f.write(f"baseUrl={api_provider.get('baseUrl') if isinstance(api_provider, dict) else ''}\n")
         f.write(f"llmModel={api_provider.get('model') if isinstance(api_provider, dict) else ''}\n")
         f.write(f"timeoutSec={timeout_sec}\n")
-        f.write(f"status={final_status} durationMs={duration_ms}\n")
+        f.write(f"status={final_status} runnerStatus={status_raw} durationMs={duration_ms}\n")
         f.write(f"turns={turns} promptTokens={prompt_tokens} completionTokens={completion_tokens} totalTokens={total_tokens}\n")
         f.write(f"retrievalMethod={retrieval_method} outputs={len(output_paths)} returnedPaths={len(returned_paths_rel)}\n")
+        if misplaced_outputs:
+            f.write(f"misplacedOutputs={len(misplaced_outputs)}\n")
         if isinstance(exec_from_agent, list) and exec_from_agent:
             f.write(f"executionTrace={len(exec_from_agent)}\n")
 
@@ -633,15 +999,18 @@ def _run_one_case(
         "name": str(meta.get("id_prefix") or meta.get("name") or ""),
         "workDir": os.path.abspath(work_dir),
         "status": final_status,
+        "runnerStatus": status_raw,
+        "partialOutputCollected": status_raw != "ok" and bool(output_paths),
         "durationMs": duration_ms,
         "turns": turns,
         "promptTokens": prompt_tokens,
         "completionTokens": completion_tokens,
         "totalTokens": total_tokens,
         "checks": checks,
-        "errorType": ("Timeout" if final_status == "timeout" else ("RunnerError" if final_status == "error" else None)),
+        "errorType": ("Timeout" if status_raw == "timeout" else ("RunnerError" if status_raw == "error" else None)),
         "errorMessage": run_res.get("errorMessage") if isinstance(run_res.get("errorMessage"), str) else None,
         "traceback": None,
+        "workDirCopy": workdir_copy_info or None,
         "trace": {
             "prompt": {"system": None, "user": prompt, "promptTail": prompt_tail or None},
             "executionTrace": exec_from_agent or [],
@@ -655,6 +1024,7 @@ def _run_one_case(
                 "returnedPaths": returned_paths_rel,
                 "retrievalMethod": retrieval_method,
                 "outputManifest": manifest,
+                "misplacedOutputs": misplaced_outputs,
             },
             "raw": {"stdout": stdout_txt, "stderr": stderr_txt},
         },
@@ -693,14 +1063,32 @@ def _run_one_case(
             with open(os.path.join(case_dir, "agent.log"), "a", encoding="utf-8") as f:
                 f.write(f"\njudge_error={type(e).__name__}: {e}\n")
 
-    try:
-        filesys_rollback(
-            standard_work_dir=standard_work_dir_map[meta["file_system"]],
-            work_dir=work_dir_map[meta["file_system"]],
-        )
-    except Exception as e:
-        with open(os.path.join(case_dir, "agent.log"), "a", encoding="utf-8") as f:
-            f.write(f"\nrollback_error={type(e).__name__}: {e}\n")
+    work_dir_retained = os.path.isdir(work_dir) if isolated_workdir else True
+    if isolated_workdir:
+        try:
+            work_dir_retained = _cleanup_isolated_work_dir(
+                work_dir=work_dir,
+                final_status=final_status,
+                policy=task_workdir_cleanup,
+            )
+        except Exception as e:
+            work_dir_retained = os.path.isdir(work_dir)
+            with open(os.path.join(case_dir, "agent.log"), "a", encoding="utf-8") as f:
+                f.write(f"\nworkdir_cleanup_error={type(e).__name__}: {e}\n")
+    else:
+        try:
+            filesys_rollback(
+                standard_work_dir=standard_work_dir_map[meta["file_system"]],
+                work_dir=work_dir_map[meta["file_system"]],
+            )
+        except Exception as e:
+            with open(os.path.join(case_dir, "agent.log"), "a", encoding="utf-8") as f:
+                f.write(f"\nrollback_error={type(e).__name__}: {e}\n")
+
+    agent_json["workDirRetained"] = work_dir_retained
+    agent_json["sharedWorkDir"] = os.path.abspath(shared_work_dir)
+    _write_json(os.path.join(case_dir, "agent.json"), agent_json)
+    case_out["workDirRetained"] = work_dir_retained
 
     return {"index": idx, "summary": summary, "case": case_out}
 
@@ -721,6 +1109,8 @@ def _run_group(
     standard_work_dir_map: Dict[str, str],
     agent_name: str,
     model_name: str,
+    isolated_workdir: bool,
+    task_workdir_cleanup: str,
 ) -> Dict[str, Json]:
     group_summary = _new_summary()
     group_cases: List[Tuple[int, Dict[str, Json]]] = []
@@ -741,6 +1131,8 @@ def _run_group(
             standard_work_dir_map=standard_work_dir_map,
             agent_name=agent_name,
             model_name=model_name,
+            isolated_workdir=isolated_workdir,
+            task_workdir_cleanup=task_workdir_cleanup,
         )
         _merge_summary(group_summary, res["summary"])
         if isinstance(res.get("case"), dict):
@@ -779,6 +1171,12 @@ def main() -> None:
     eval_while_running = cfg.get("eval_while_running") or False
     eval_yaml = str(cfg.get("eval_yaml") or "").strip()
     workdir_parallel = _as_bool(cfg.get("workdir_parallel"), default=True)
+    task_parallel = _as_bool(cfg.get("task_parallel"), default=True)
+    task_parallel_workers = _as_int(cfg.get("task_parallel_workers"), default=10, minimum=1)
+    task_workdir_cleanup = _cleanup_policy(cfg.get("task_workdir_cleanup"))
+    cfg["task_parallel"] = task_parallel
+    cfg["task_parallel_workers"] = task_parallel_workers
+    cfg["task_workdir_cleanup"] = task_workdir_cleanup
 
     assert agent_name and model_name and run_name and task_path and output_dir and fs_map_file
 
@@ -801,13 +1199,61 @@ def main() -> None:
     summary = _new_summary()
     cases_by_index: Dict[int, Dict[str, Json]] = {}
     started = time.time()
-    if workdir_parallel:
+    if task_parallel:
+        grouped = {}
+    elif workdir_parallel:
         grouped = _group_metas_by_file_system(metas)
     else:
         grouped = {"__all__": list(enumerate(metas))}
 
     with tqdm(total=len(metas), desc=f"{agent_name}--{model_name}--{run_name}") as pbar:
-        if workdir_parallel:
+        if task_parallel:
+            max_workers = min(task_parallel_workers, max(1, len(metas)))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_task: Dict[Any, Dict[str, Json]] = {}
+                for idx, meta in enumerate(metas):
+                    fut = executor.submit(
+                        _run_one_case,
+                        idx=idx,
+                        meta=meta,
+                        runs_root=runs_root,
+                        run_fn=run_fn,
+                        prompt_head=prompt_head,
+                        prompt_tail=prompt_tail,
+                        task_target_output_dir=task_target_output_dir,
+                        timeout_sec=timeout_sec,
+                        api_provider=api_provider,
+                        eval_while_running=eval_while_running,
+                        eval_yaml=eval_yaml,
+                        work_dir_map=work_dir_map,
+                        standard_work_dir_map=standard_work_dir_map,
+                        agent_name=agent_name,
+                        model_name=model_name,
+                        isolated_workdir=True,
+                        task_workdir_cleanup=task_workdir_cleanup,
+                    )
+                    future_to_task[fut] = {
+                        "caseId": str(meta.get("id") or ""),
+                        "fileSystem": str(meta.get("file_system") or "*"),
+                    }
+                for fut in as_completed(future_to_task):
+                    task_info = future_to_task[fut]
+                    try:
+                        res = fut.result()
+                    except Exception:
+                        print(
+                            "[parallel-error] "
+                            f"case={task_info.get('caseId')} "
+                            f"file_system={task_info.get('fileSystem')}",
+                            flush=True,
+                        )
+                        print(traceback.format_exc(), flush=True)
+                        raise
+                    _merge_summary(summary, res["summary"])
+                    if isinstance(res.get("case"), dict):
+                        cases_by_index[int(res["index"])] = res["case"]
+                    pbar.update(1)
+        elif workdir_parallel:
             max_workers = min(5, max(1, len(grouped)))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_group: Dict[Any, Dict[str, Json]] = {}
@@ -828,6 +1274,8 @@ def main() -> None:
                         standard_work_dir_map=standard_work_dir_map,
                         agent_name=agent_name,
                         model_name=model_name,
+                        isolated_workdir=False,
+                        task_workdir_cleanup=task_workdir_cleanup,
                     )
                     future_to_group[fut] = {
                         "groupName": group_name,
@@ -867,6 +1315,8 @@ def main() -> None:
                     standard_work_dir_map=standard_work_dir_map,
                     agent_name=agent_name,
                     model_name=model_name,
+                    isolated_workdir=False,
+                    task_workdir_cleanup=task_workdir_cleanup,
                 )
                 _merge_summary(summary, res["summary"])
                 for idx, case_out in res["cases"]:

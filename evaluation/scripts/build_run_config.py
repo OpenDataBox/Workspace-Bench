@@ -115,6 +115,8 @@ def build_config(args: argparse.Namespace) -> Path:
     task_limit = args.task_limit
     if task_limit is None and dataset == "smoke":
         task_limit = 1
+    task_parallel = not bool(args.no_task_parallel)
+    task_parallel_workers = max(1, int(args.task_parallel_workers or 10))
 
     generated_root = eval_root / ".generated" / "run_configs"
     runs_dir = generated_root / "runs"
@@ -140,6 +142,9 @@ def build_config(args: argparse.Namespace) -> Path:
         "prompt_tail": PROMPT_TAIL,
         "timeout_sec": float(args.timeout_sec),
         "task_target_output_dir": "model_output",
+        "task_parallel": task_parallel,
+        "task_parallel_workers": task_parallel_workers,
+        "task_workdir_cleanup": "failed",
         "eval_while_running": False,
         "eval_yaml": args.eval_yaml,
         "api_provider": _provider_config(harness, args.provider_type, env_prefix, llm_model),
@@ -165,6 +170,8 @@ def main() -> None:
     parser.add_argument("--run-name", help="Output run name; defaults to Smoke/Lite/Full")
     parser.add_argument("--task-limit", type=int)
     parser.add_argument("--timeout-sec", type=float, default=2000.0)
+    parser.add_argument("--task-parallel-workers", type=int, help="Number of isolated task-level workers; defaults to 10")
+    parser.add_argument("--no-task-parallel", action="store_true", help="Disable isolated task-level parallelism")
     parser.add_argument("--eval-yaml", default="runs/judge.yaml")
     args = parser.parse_args()
     print(build_config(args))
