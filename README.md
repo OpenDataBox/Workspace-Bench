@@ -176,6 +176,25 @@ Rubric judgments are written into each task directory as:
 evaluation/output/Codex--Kimi-K2.5--Smoke/100/rubrics_judge--{JUDGE_MODEL}.json
 ```
 
+### Preliminary grounded rescoring
+
+The Chinese Lite rubric audit can be used to recompute an existing judge run
+without rerunning agents or judges. The script keeps rubric rows whose
+`basis_label` is `有依据`, then writes an aggregate JSON summary next to the run
+outputs. The JSON includes its per-task details in `resultUnits`:
+
+```bash
+python3 evaluation/scripts/rescore_preliminary_grounded.py \
+  evaluation/output/Codex--Kimi-K2.5--Lite \
+  --audit-csv evaluation/audits/workspace_bench_lite_cn_rubric_grounding_audit_v0.1.csv
+```
+
+The resulting `preliminary_grounded_summary.json` reports the original observed
+score, the filtered score, and the selected-rubric coverage. This is a
+provisional input-grounding analysis, not a final certification that every
+retained rubric is task-essential or accepts all semantically equivalent
+solutions.
+
 Task outputs, logs, and judge artifacts are written to:
 
 ```text
