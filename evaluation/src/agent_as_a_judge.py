@@ -248,11 +248,60 @@ def _resolve_original_task_source(meta: Dict[str, Json]) -> Optional[str]:
     return None
 
 
+def _build_trace_snapshot(task_dir: str) -> Dict[str, Json]:
+    """Build the field-filtered execution snapshot exposed to the judge agent."""
+    agent_json = _safe_load_json(os.path.join(task_dir, "agent.json"))
+    if not isinstance(agent_json, dict):
+        return {"taskDir": os.path.abspath(task_dir), "workDir": None, "events": []}
+
+    work_dir = agent_json.get("workDir") if isinstance(agent_json.get("workDir"), str) else None
+    trace = agent_json.get("trace")
+    execution_trace = (
+        trace.get("executionTrace")
+        if isinstance(trace, dict) and isinstance(trace.get("executionTrace"), list)
+        else []
+    )
+
+    events: List[Dict[str, Json]] = []
+    for item in execution_trace:
+        if not isinstance(item, dict):
+            continue
+        ev_type = item.get("type")
+        if ev_type == "tool":
+            events.append(
+                {
+                    "type": "tool",
+                    "tool": item.get("tool"),
+                    "input": item.get("input") if isinstance(item.get("input"), dict) else {},
+                    "output": item.get("output") if isinstance(item.get("output"), dict) else {},
+                    "timestamp": item.get("timestamp"),
+                }
+            )
+        elif ev_type == "text":
+            content = item.get("content")
+            if isinstance(content, str):
+                events.append(
+                    {
+                        "type": "text",
+                        "role": item.get("role"),
+                        "content": content,
+                        "timestamp": item.get("timestamp"),
+                    }
+                )
+
+    return {
+        "taskDir": os.path.abspath(task_dir),
+        "workDir": work_dir,
+        "events": events,
+    }
+
+
 def _prepare_judge_view(*, sandbox_try_dir: str, task_dir: str, meta: Dict[str, Json]) -> Dict[str, str]:
     """
     Build a restricted judge workspace so ClaudeCode can see:
     - original inputs from tasks/<case>/data
     - candidate outputs from task_dir/output
+    - a field-filtered execution trace snapshot from task_dir/agent.json
     But it should not see tasks/<case>/output or output_cc (GT-like answers).
     """
     view_dir = os.path.join(sandbox_try_dir, "judge_view")
@@ -294,6 +343,10 @@ def _prepare_judge_view(*, sandbox_try_dir: str, task_dir: str, meta: Dict[str, 
         _symlink_or_copy(candidate_output_dir, dst)
         out["candidate_output_path"] = dst
 
+    trace_snapshot_path = os.path.join(view_dir, "trace_snapshot.json")
+    _write_json(trace_snapshot_path, _build_trace_snapshot(task_dir))
+    out["trace_snapshot_path"] = trace_snapshot_path
+
     # Also provide a small README to steer the judge away from GT-like dirs.
     readme_path = os.path.join(view_dir, "README.txt")
     _write_text(
@@ -304,6 +357,7 @@ def _prepare_judge_view(*, sandbox_try_dir: str, task_dir: str, meta: Dict[str, 
                 "",
                 "- inputs/: original input files for this task (NOT ground truth answers)",
                 "- candidate_output/: outputs produced by the tested agent (evaluate THIS directory if present)",
+                "- trace_snapshot.json: field-filtered execution evidence from the tested agent (inspect if process evidence is useful)",
                 "",
                 "Do NOT use any other directories as answers.",
             ]
@@ -336,9 +390,10 @@ def _build_judge_prompt(
         instructions = [
             "你是一个严格的任务评测员（agent-as-a-judge）。",
             "你当前真正可访问的工作目录是 judgeView.cwd，而不是 task JSON 里的系统绝对路径。",
-            "为了避免误看 ground truth，judgeView 里只暴露了允许评估的内容：inputs/（原始输入文件）、candidate_output/（待评估输出目录，如果存在）。",
+            "为了避免误看 ground truth，judgeView 里只暴露了允许评估的内容：inputs/（原始输入文件）、candidate_output/（待评估输出目录，如果存在）、trace_snapshot.json（被测 agent 的字段裁剪执行轨迹，如果存在）。",
             "禁止把原始任务目录里的 output/output_cc/gt 等目录当成答案来源；本次只允许评估 judgeView.candidateOutputPath 中的结果。",
             "inputs/ 仅用于查看原始输入文件和理解任务，不是标准答案目录。",
+            "trace_snapshot.json 是被测 agent 的执行证据，不是标准答案；如果需要了解 agent 如何完成任务，请自行读取该文件，不要假设它的内容。",
             "只能基于你实际检查到的文件/目录/文件内容给出判断，不要凭空假设。",
             "你需要自己决定要检查的具体路径（例如用 ls/find/grep 等），并在 evidence 中写明你检查的路径与观察到的现象。",
             "最终只输出一个 JSON 对象，格式必须为："
@@ -353,9 +408,10 @@ def _build_judge_prompt(
         instructions = [
             "You are a strict task evaluator (agent-as-a-judge).",
             "Your actual accessible working directory is judgeView.cwd, not any absolute system path in the task JSON.",
-            "To avoid seeing ground truth, judgeView exposes only approved evaluation content: inputs/ (original input files) and candidate_output/ (candidate outputs, if present).",
+            "To avoid seeing ground truth, judgeView exposes only approved evaluation content: inputs/ (original input files), candidate_output/ (candidate outputs, if present), and trace_snapshot.json (the field-filtered tested-agent execution trace, if present).",
             "Do not use output/output_cc/gt or similar directories from the original task directory as answer sources; evaluate only judgeView.candidateOutputPath for this run.",
             "inputs/ is only for inspecting original input files and understanding the task; it is not a ground-truth answer directory.",
+            "trace_snapshot.json is execution evidence, not a ground-truth answer. If process evidence is useful, inspect this file yourself; do not assume its contents.",
             "Base judgments only on files, directories, and contents you actually inspect; do not assume facts.",
             "Decide which paths to inspect yourself (for example with ls/find/grep), and in evidence state the checked paths and observed facts.",
             "Output only one JSON object in this exact shape: "
@@ -380,6 +436,7 @@ def _build_judge_prompt(
             "inputsPath": judge_view.get("inputs_visible_path"),
             "originalTaskMetadataPath": judge_view.get("original_task_metadata_path"),
             "candidateOutputPath": judge_view.get("candidate_output_path"),
+            "traceSnapshotPath": judge_view.get("trace_snapshot_path"),
         },
         "instructions": instructions,
     }

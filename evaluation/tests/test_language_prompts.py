@@ -120,6 +120,91 @@ class JudgePromptLanguageTests(unittest.TestCase):
         self.assertIn("你是一个严格的任务评测员", prompt)
         self.assertIn('\\"rubrics\\": [ {\\"index\\":0,\\"passed\\":true', prompt)
 
+    def test_judge_prompt_exposes_trace_snapshot_path_without_inlining_trace(self):
+        prompt = agent_as_a_judge._build_judge_prompt(
+            task_id="case",
+            task_dir="/tmp/case",
+            meta={
+                "language": "en",
+                "task": "Create a report.",
+                "rubrics": ["The report exists."],
+            },
+            judge_view={
+                "view_dir": "/tmp/view",
+                "candidate_output_path": "/tmp/view/candidate_output",
+                "trace_snapshot_path": "/tmp/view/trace_snapshot.json",
+            },
+            language="en",
+        )
+
+        self.assertIn("trace_snapshot.json", prompt)
+        self.assertIn("/tmp/view/trace_snapshot.json", prompt)
+        self.assertIn("field-filtered tested-agent execution trace", prompt)
+        self.assertNotIn("agent_trace.json", prompt)
+
+
+class JudgeTraceViewTests(unittest.TestCase):
+    def test_prepares_trace_snapshot_without_truncation_or_raw_trace(self):
+        with tempfile.TemporaryDirectory() as td:
+            task_dir = os.path.join(td, "task")
+            sandbox_try_dir = os.path.join(td, "sandbox", "try_1")
+            os.makedirs(os.path.join(task_dir, "output"), exist_ok=True)
+
+            trace = {
+                "llm": {"provider": "test"},
+                "prompt": {"user": "prompt-" + ("x" * 5000)},
+                "executionTrace": [
+                    {
+                        "type": "tool",
+                        "tool": "Bash",
+                        "input": {"command": "echo " + ("y" * 5000)},
+                        "output": {"stdout": "result-" + ("z" * 5000)},
+                        "timestamp": "2026-07-15T00:00:00Z",
+                    },
+                    {
+                        "type": "text",
+                        "role": "assistant",
+                        "content": "answer-" + ("a" * 5000),
+                        "timestamp": "2026-07-15T00:00:01Z",
+                    },
+                    {"type": "internal", "secret": "must not be exposed"},
+                ],
+            }
+            with open(os.path.join(task_dir, "agent.json"), "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "status": "passed",
+                        "workDir": "/tmp/workdir",
+                        "trace": trace,
+                    },
+                    f,
+                    ensure_ascii=False,
+                )
+
+            view = agent_as_a_judge._prepare_judge_view(
+                sandbox_try_dir=sandbox_try_dir,
+                task_dir=task_dir,
+                meta={"task": "Create a report.", "rubrics": ["The report exists."]},
+            )
+
+            snapshot_path = os.path.join(view["view_dir"], "trace_snapshot.json")
+            self.assertEqual(view["trace_snapshot_path"], snapshot_path)
+            self.assertNotIn("agent_trace_path", view)
+            self.assertFalse(os.path.exists(os.path.join(view["view_dir"], "agent_trace.json")))
+
+            with open(snapshot_path, "r", encoding="utf-8") as f:
+                snapshot = json.load(f)
+
+            self.assertEqual(set(snapshot), {"taskDir", "workDir", "events"})
+            self.assertEqual(snapshot["workDir"], "/tmp/workdir")
+            self.assertEqual(len(snapshot["events"]), 2)
+            self.assertEqual(snapshot["events"][0]["input"]["command"], "echo " + ("y" * 5000))
+            self.assertEqual(snapshot["events"][0]["output"]["stdout"], "result-" + ("z" * 5000))
+            self.assertEqual(len(snapshot["events"][1]["content"]), 5007)
+            self.assertNotIn("llm", snapshot)
+            self.assertNotIn("prompt", snapshot)
+            self.assertNotIn("secret", json.dumps(snapshot, ensure_ascii=False))
+
 
 class BuildRunConfigLanguageTests(unittest.TestCase):
     def test_generated_config_defaults_to_auto_prompt_language(self):
