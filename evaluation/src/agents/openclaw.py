@@ -922,11 +922,24 @@ def _extract_openclaw_trace(*, session_jsonl_path: str, base_url: Optional[str],
                         t0["durationMs"] = int(det.get("durationMs") or 0)
                     if isinstance(det.get("exitCode"), int):
                         t0["exitCode"] = int(det.get("exitCode") or 0)
-                        t0["output"] = {"text": text}
-                    else:
-                        t0["output"] = {"text": text}
+                    output_payload: Dict[str, Json] = {
+                        # Keep the source content, including non-text blocks.
+                        "content": content,
+                        # Retain a convenient text projection for existing users.
+                        "text": text,
+                    }
+                    for key in ("artifact", "name", "isError", "error"):
+                        if key in msg:
+                            output_payload[key] = msg.get(key)
+                    if det:
+                        output_payload["details"] = det
+                    t0["output"] = output_payload
                     if isinstance(det.get("status"), str):
                         t0["status"] = str(det.get("status"))
+                    elif msg.get("isError") is True:
+                        t0["status"] = "failed"
+                    else:
+                        t0["status"] = "completed"
                 continue
 
     usage_total["total_tokens"] = usage_total["total_tokens"] or (usage_total["prompt_tokens"] + usage_total["completion_tokens"])

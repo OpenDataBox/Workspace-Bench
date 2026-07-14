@@ -21,7 +21,7 @@
 import fs from 'fs';
 import path from 'path';
 import { query } from '../../evaluation/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 // ─── CLI Argument Parsing ─────────────────────────────────────────────────────
 
@@ -143,6 +143,63 @@ function statusColor(status) {
     case 'skipped': return c.cyan;
     default:        return c.grey;
   }
+}
+
+/**
+ * Apply a Claude SDK user/tool_result message to the indexed tool calls.
+ *
+ * Depending on the SDK version, tool results arrive either as a standalone
+ * `tool` message or inside a `user` message whose content contains
+ * `tool_result` blocks. Keep this adapter tolerant of both wrapper shapes so
+ * the normalized trajectory does not lose the actual tool output.
+ */
+export function applyToolResultMessage(msg, toolCallIndex) {
+  if (!msg || msg.type !== 'user' || !toolCallIndex || typeof toolCallIndex !== 'object') {
+    return 0;
+  }
+
+  const part = (msg.part && typeof msg.part === 'object') ? msg.part : msg;
+  const message = (part.message && typeof part.message === 'object')
+    ? part.message
+    : ((msg.message && typeof msg.message === 'object') ? msg.message : null);
+  const content = Array.isArray(message?.content) ? message.content : [];
+  const toolUseResult = (part.tool_use_result && typeof part.tool_use_result === 'object')
+    ? part.tool_use_result
+    : ((msg.tool_use_result && typeof msg.tool_use_result === 'object') ? msg.tool_use_result : null);
+
+  let handled = 0;
+  for (const block of content) {
+    if (!block || block.type !== 'tool_result') continue;
+    const callID = block.tool_use_id ?? block.toolUseId;
+    if (typeof callID !== 'string' || !toolCallIndex[callID]) continue;
+
+    const isError = block.is_error === true
+      || block.isError === true
+      || toolUseResult?.is_error === true
+      || toolUseResult?.isError === true;
+    const output = Object.prototype.hasOwnProperty.call(block, 'content')
+      ? block.content
+      : (Object.prototype.hasOwnProperty.call(toolUseResult ?? {}, 'content') ? toolUseResult.content : null);
+    const durationMs = Number.isInteger(block.durationMs)
+      ? block.durationMs
+      : (Number.isInteger(toolUseResult?.durationMs) ? toolUseResult.durationMs : null);
+    const exitCode = Number.isInteger(block.exitCode)
+      ? block.exitCode
+      : (Number.isInteger(toolUseResult?.exitCode) ? toolUseResult.exitCode : null);
+    const state = isError ? 'failed' : 'completed';
+    const idx = toolCallIndex[callID];
+
+    for (const entry of [idx.trajectoryEntry, idx.toolCallEntry]) {
+      if (!entry || typeof entry !== 'object') continue;
+      entry.state = state;
+      entry.output = output;
+      entry.isError = isError;
+      if (durationMs !== null) entry.durationMs = durationMs;
+      if (exitCode !== null) entry.exitCode = exitCode;
+    }
+    handled += 1;
+  }
+  return handled;
 }
 
 // ─── Core Task Runner ─────────────────────────────────────────────────────────
@@ -541,6 +598,20 @@ async function _runTaskImpl(task, opts, startedAt, startMs) {
         continue;
       }
 
+      // ── 5b. Tool results embedded in user messages ───────────────────────
+      // Newer Claude SDK versions deliver tool results as user messages with
+      // content blocks of type `tool_result`, rather than as msg.type === tool.
+      if (msg.type === 'user') {
+        applyToolResultMessage(msg, toolCallIndex);
+        stdoutLines.push(JSON.stringify({
+          type: 'user',
+          timestamp: Date.now(),
+          sessionID: claudeSessionId,
+          part: msg,
+        }));
+        continue;
+      }
+
       // ── 6. Fallback: emit any other message type as-is ────────────────────
       stdoutLines.push(JSON.stringify({
         type: msg.type,
@@ -863,10 +934,13 @@ async function main() {
   process.exit(summary.failed > 0 || summary.timeout > 0 ? 1 : 0);
 }
 
-main().catch(err => {
-  console.error('Fatal error:', err);
-  process.exit(1);
-});
+const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : null;
+if (invokedPath === import.meta.url) {
+  main().catch(err => {
+    console.error('Fatal error:', err);
+    process.exit(1);
+  });
+}
 
 // Suppress noisy SDK debug permission errors
 process.on('uncaughtException', err => {
