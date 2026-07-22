@@ -331,9 +331,46 @@ def _iter_metadata_paths(root: str, *, limit: Optional[int] = None) -> List[str]
     return out
 
 
-def _load_metadatas(tasks_root: str, *, limit: Optional[int]) -> List[Dict[str, Json]]:
+def _metadata_task_id(meta: Dict[str, Json], metadata_path: str) -> str:
+    value = meta.get("id")
+    if value in (None, ""):
+        value = meta.get("absolute_id")
+    if value in (None, ""):
+        value = os.path.basename(os.path.dirname(metadata_path))
+    return str(value).strip()
+
+
+def _normalize_config_task_ids(value: Json) -> List[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("task_ids must be a list")
+    task_ids = [str(item).strip() for item in value]
+    if any(not task_id for task_id in task_ids):
+        raise ValueError("task_ids must not contain empty values")
+    duplicates = sorted({task_id for task_id in task_ids if task_ids.count(task_id) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate task id(s): {', '.join(duplicates)}")
+    return task_ids
+
+
+def _load_metadatas(
+    tasks_root: str,
+    *,
+    limit: Optional[int] = None,
+    task_ids: Json = None,
+    persona: Json = None,
+) -> List[Dict[str, Json]]:
+    requested_ids = _normalize_config_task_ids(task_ids)
+    persona_value = None if persona is None else str(persona).strip()
+    if persona is not None and not persona_value:
+        raise ValueError("persona must not be empty")
+    selected = sum([limit is not None, bool(requested_ids), persona_value is not None])
+    if selected > 1:
+        raise ValueError("task_limit, task_ids, and persona are mutually exclusive")
+
     metas: List[Dict[str, Json]] = []
-    for mp in _iter_metadata_paths(tasks_root, limit=limit):
+    for mp in _iter_metadata_paths(tasks_root):
         try:
             meta = _read_json(mp)
         except Exception:
@@ -343,6 +380,35 @@ def _load_metadatas(tasks_root: str, *, limit: Optional[int]) -> List[Dict[str, 
         m = dict(meta)
         m["__metadata_path"] = mp
         metas.append(m)
+
+    if requested_ids:
+        by_id: Dict[str, Dict[str, Json]] = {}
+        duplicate_metadata_ids: List[str] = []
+        for meta in metas:
+            metadata_path = str(meta["__metadata_path"])
+            task_id = _metadata_task_id(meta, metadata_path)
+            if task_id in by_id:
+                duplicate_metadata_ids.append(task_id)
+            else:
+                by_id[task_id] = meta
+        if duplicate_metadata_ids:
+            duplicate_text = ", ".join(sorted(set(duplicate_metadata_ids)))
+            raise ValueError(f"duplicate task id(s) in dataset: {duplicate_text}")
+        missing = [task_id for task_id in requested_ids if task_id not in by_id]
+        if missing:
+            raise ValueError(f"task id(s) not found: {', '.join(missing)}")
+        return [by_id[task_id] for task_id in requested_ids]
+
+    if persona_value is not None:
+        matched = [meta for meta in metas if str(meta.get("persona") or "").strip() == persona_value]
+        if not matched:
+            available = sorted({str(meta.get("persona") or "").strip() for meta in metas} - {""})
+            suffix = f"; available personas: {', '.join(available)}" if available else ""
+            raise ValueError(f"persona not found: {persona_value}{suffix}")
+        return matched
+
+    if limit is not None:
+        return metas[: max(0, int(limit))]
     return metas
 
 
@@ -1417,6 +1483,8 @@ def main() -> None:
     prompt_head_by_language = _language_text_map(cfg.get("prompt_head_by_language"))
     prompt_tail_by_language = _language_text_map(cfg.get("prompt_tail_by_language"))
     task_limit = cfg.get("task_limit")
+    task_ids = cfg.get("task_ids")
+    persona = cfg.get("persona")
     timeout_sec = float(cfg.get("timeout_sec") or 300.0)
     api_provider = cfg.get("api_provider") if isinstance(cfg.get("api_provider"), dict) else {}
 
@@ -1442,7 +1510,15 @@ def main() -> None:
     raw_work_dir_map = fs_map_all.get("raw_work_dir", {})
     standard_work_dir_map = fs_map_all.get("standard_work_dir", {})
 
-    metas = _load_metadatas(task_path, limit=int(task_limit) if task_limit is not None else None)
+    try:
+        metas = _load_metadatas(
+            task_path,
+            limit=int(task_limit) if task_limit is not None else None,
+            task_ids=task_ids,
+            persona=persona,
+        )
+    except (TypeError, ValueError) as e:
+        raise SystemExit(f"invalid task selection: {e}") from e
     if not metas:
         raise SystemExit("no tasks found")
 

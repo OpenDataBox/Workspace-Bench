@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -35,6 +36,34 @@ def _safe_slug(value: str) -> str:
 
 def _display_slug(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip()) or "Custom"
+
+
+def _normalize_task_ids(values: list[str] | None) -> list[str]:
+    task_ids: list[str] = []
+    for value in values or []:
+        task_ids.extend(part.strip() for part in str(value).split(",") if part.strip())
+    if not task_ids:
+        return []
+    invalid = [task_id for task_id in task_ids if not re.fullmatch(r"[A-Za-z0-9._-]+", task_id)]
+    if invalid:
+        raise SystemExit(f"invalid task id(s): {', '.join(invalid)}")
+    duplicates = sorted({task_id for task_id in task_ids if task_ids.count(task_id) > 1})
+    if duplicates:
+        raise SystemExit(f"duplicate task id(s): {', '.join(duplicates)}")
+    return task_ids
+
+
+def _selection_suffix(*, task_ids: list[str], persona: str | None) -> tuple[str, str]:
+    if task_ids:
+        joined = "-".join(task_ids)
+        if len(task_ids) <= 3 and len(joined) <= 48:
+            return f"tasks-{_safe_slug(joined)}", f"Tasks-{_display_slug(joined)}"
+        digest = hashlib.sha256("\0".join(task_ids).encode("utf-8")).hexdigest()[:10]
+        return f"tasks-{len(task_ids)}-{digest}", f"Tasks-{len(task_ids)}-{digest}"
+    if persona:
+        slug = _safe_slug(persona)[:60]
+        return f"persona-{slug}", f"Persona-{_display_slug(persona)[:60]}"
+    return "", ""
 
 
 def _normalize_harness(value: str) -> str:
@@ -102,10 +131,23 @@ def build_config(args: argparse.Namespace) -> Path:
     if dataset not in {"smoke", "lite", "full"}:
         raise SystemExit(f"unsupported dataset: {args.dataset}")
 
-    run_name = args.run_name or {"smoke": "Smoke", "lite": "Lite", "full": "Full"}[dataset]
+    task_ids = _normalize_task_ids(getattr(args, "task_ids", None))
+    persona_value = getattr(args, "persona", None)
+    persona = str(persona_value).strip() if persona_value is not None else None
+    if persona_value is not None and not persona:
+        raise SystemExit("--persona must not be empty")
+    task_limit = getattr(args, "task_limit", None)
+    selected = sum([task_limit is not None, bool(task_ids), persona is not None])
+    if selected > 1:
+        raise SystemExit("--task-limit, --task-ids, and --persona are mutually exclusive")
+
+    selection_slug, selection_name = _selection_suffix(task_ids=task_ids, persona=persona)
+    default_run_name = {"smoke": "Smoke", "lite": "Lite", "full": "Full"}[dataset]
+    run_name = args.run_name or (
+        f"{default_run_name}-{selection_name}" if selection_name else default_run_name
+    )
     task_path = eval_root / ("tasks" if dataset == "full" else "tasks_lite")
-    task_limit = args.task_limit
-    if task_limit is None and dataset == "smoke":
+    if task_limit is None and not task_ids and persona is None and dataset == "smoke":
         task_limit = 1
     task_parallel = not bool(args.no_task_parallel)
     task_parallel_workers = max(1, int(args.task_parallel_workers or 10))
@@ -117,6 +159,10 @@ def build_config(args: argparse.Namespace) -> Path:
     fs_map_dir.mkdir(parents=True, exist_ok=True)
 
     config_slug = f"{harness.lower()}-{_safe_slug(args.model)}-{dataset}"
+    if selection_slug:
+        config_slug = f"{config_slug}-{selection_slug}"
+    elif args.run_name:
+        config_slug = f"{config_slug}-{_safe_slug(args.run_name)}"
     fs_map_path = fs_map_dir / f"fs_map_{harness}_{_display_slug(model_name)}.json"
     fs_map_path.write_text(
         json.dumps(_fs_map(eval_root, harness, model_name), ensure_ascii=False, indent=2) + "\n",
@@ -146,6 +192,10 @@ def build_config(args: argparse.Namespace) -> Path:
     }
     if task_limit is not None:
         config["task_limit"] = int(task_limit)
+    elif task_ids:
+        config["task_ids"] = task_ids
+    elif persona is not None:
+        config["persona"] = persona
 
     config_path = runs_dir / f"{config_slug}.yaml"
     config_path.write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
@@ -163,7 +213,14 @@ def main() -> None:
     parser.add_argument("--model-name", help="Display name used in output directory")
     parser.add_argument("--env-prefix", help="Environment variable prefix for BASE_URL/API_KEY")
     parser.add_argument("--run-name", help="Output run name; defaults to Smoke/Lite/Full")
-    parser.add_argument("--task-limit", type=int)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--task-limit", type=int, help="Run the first N tasks in deterministic order")
+    selection.add_argument(
+        "--task-ids",
+        nargs="+",
+        help="Run exact task IDs; accepts spaces or comma-separated values",
+    )
+    selection.add_argument("--persona", help="Run every task whose metadata persona exactly matches this value")
     parser.add_argument("--timeout-sec", type=float, default=2000.0)
     parser.add_argument("--task-parallel-workers", type=int, help="Number of isolated task-level workers; defaults to 10")
     parser.add_argument("--no-task-parallel", action="store_true", help="Disable isolated task-level parallelism")

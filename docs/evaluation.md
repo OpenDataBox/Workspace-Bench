@@ -73,6 +73,32 @@ docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
   --dataset full
 ```
 
+### Running Selected Tasks
+
+Use `--task-ids` to run an exact task subset. IDs may be separated by spaces or commas, and they run in the specified order:
+
+```bash
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
+  bash /workspace/Workspace-Bench/evaluation/docker/run-benchmark.sh \
+  --harness codex \
+  --model kimi-k2.5 \
+  --dataset lite \
+  --task-ids 45 55 386
+```
+
+Use `--persona` to run every task whose metadata `persona` exactly matches the supplied value:
+
+```bash
+docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
+  bash /workspace/Workspace-Bench/evaluation/docker/run-benchmark.sh \
+  --harness codex \
+  --model kimi-k2.5 \
+  --dataset lite \
+  --persona "Product Manager"
+```
+
+`--task-ids`, `--persona`, and `--task-limit` are mutually exclusive. Missing task IDs, duplicate task IDs, and unknown personas stop the run instead of silently changing the sample. The generated run name includes the selection, so a subset does not reuse the default Lite or Full output directory. Task selection changes which tasks execute; it does not shrink the standard profile workspace prepared from the dataset.
+
 ### Using Different Harnesses
 
 ```bash
