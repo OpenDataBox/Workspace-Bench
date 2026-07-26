@@ -151,6 +151,15 @@ def build_config(args: argparse.Namespace) -> Path:
         task_limit = 1
     task_parallel = not bool(args.no_task_parallel)
     task_parallel_workers = max(1, int(args.task_parallel_workers or 10))
+    task_isolation = str(getattr(args, "task_isolation", "process") or "process").strip().lower()
+    if task_isolation not in {"process", "container"}:
+        raise SystemExit("--task-isolation must be process or container")
+    task_resources = {
+        "cpus": str(getattr(args, "task_cpus", "2")),
+        "memory_mb": max(1, int(getattr(args, "task_memory_mb", 8192))),
+        "pids": max(1, int(getattr(args, "task_pids", 512))),
+        "storage_mb": max(1, int(getattr(args, "task_storage_mb", 20480))),
+    }
 
     generated_root = eval_root / ".generated" / "run_configs"
     runs_dir = generated_root / "runs"
@@ -186,6 +195,8 @@ def build_config(args: argparse.Namespace) -> Path:
         "task_parallel": task_parallel,
         "task_parallel_workers": task_parallel_workers,
         "task_workdir_cleanup": "failed",
+        "task_isolation": task_isolation,
+        "task_resources": task_resources,
         "eval_while_running": False,
         "eval_yaml": args.eval_yaml,
         "api_provider": _provider_config(harness, args.provider_type, env_prefix, llm_model),
@@ -224,6 +235,16 @@ def main() -> None:
     parser.add_argument("--timeout-sec", type=float, default=2000.0)
     parser.add_argument("--task-parallel-workers", type=int, help="Number of isolated task-level workers; defaults to 10")
     parser.add_argument("--no-task-parallel", action="store_true", help="Disable isolated task-level parallelism")
+    parser.add_argument(
+        "--task-isolation",
+        choices=["process", "container"],
+        default="process",
+        help="Execution boundary recorded in the run config; the isolated Docker launcher requires container",
+    )
+    parser.add_argument("--task-cpus", default="2", help="Per-task CPU quota for the containerized protocol")
+    parser.add_argument("--task-memory-mb", type=int, default=8192, help="Per-task memory limit in MiB")
+    parser.add_argument("--task-pids", type=int, default=512, help="Per-task PID limit")
+    parser.add_argument("--task-storage-mb", type=int, default=20480, help="Per-task writable storage limit in MiB")
     parser.add_argument("--eval-yaml", default="runs/judge.yaml")
     args = parser.parse_args()
     print(build_config(args))

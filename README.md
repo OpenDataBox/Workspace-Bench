@@ -145,6 +145,22 @@ docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
   --dataset smoke
 ```
 
+For reported results, prefer the task-isolated launcher. It starts a fresh
+Docker container for each task, applies a uniform resource profile (2 CPUs,
+8 GiB memory, 512 PIDs, and 20 GiB writable task storage by default), and
+removes the container after that task completes:
+
+```bash
+python3 scripts/run_isolated_benchmark.py \
+  --harness codex \
+  --model kimi-k2.5 \
+  --dataset smoke
+```
+
+Each result includes `raw/container-isolation.json`, which records the
+image digest, resource profile, container identity, duration, and any
+process-group or storage-limit termination.
+
 Check the report:
 
 ```bash

@@ -11,6 +11,41 @@ selected agent and writes outputs plus `agent_runner_report.json`.
 `agent_as_a_judge.py` then evaluates those outputs against the task rubrics
 using a judge model through an Anthropic-compatible API.
 
+### Recommended task-isolated protocol
+
+For reported results, use the host-side launcher below rather than invoking
+`run-benchmark.sh` once for a whole task set. It creates a fresh
+`workspace-bench-task` Docker container for every task and removes it with
+`docker compose run --rm` after result collection. The task service has a
+read-only repository mount, task-local `HOME`/temporary/cache directories,
+and the same resource profile for every task: 2 CPUs, 8 GiB memory, 512 PIDs,
+and 20 GiB writable task storage by default. A process-group and case-storage
+watchdog supplements the Docker limits. Per-task evidence is written to
+`<case>/raw/container-isolation.json`.
+
+```bash
+cd evaluation
+python3 scripts/run_isolated_benchmark.py \
+  --harness codex \
+  --model kimi-k2.5 \
+  --dataset lite
+```
+
+The launcher runs tasks sequentially by design, so every task receives the
+same resource budget. To change the published profile, pass
+`--task-cpus`, `--task-memory-mb`, `--task-pids`, and
+`--task-storage-mb`; record the chosen values with the results. Docker storage
+quotas require a storage driver that supports `storage_opt.size`; the
+case-directory watchdog remains active independently of that driver.
+
+After building the image, run the reset integration check to verify that task
+containers are removed and that a successor cannot observe its predecessor's
+task-local `HOME` or `/tmp` state:
+
+```bash
+python3 scripts/verify_task_container_reset.py
+```
+
 ## Supported Harnesses
 
 | Harness | Description | API Compatibility |

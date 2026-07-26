@@ -26,6 +26,51 @@ services:
       - npm-cache:/root/.npm
       - openclaw-home:/root/.openclaw
 
+  # This service is deliberately separate from the development runner above.
+  # run_isolated_benchmark.py creates one instance per task with `--rm`, so no
+  # process, HOME directory, temporary file, or cache can survive into the
+  # next task.  The repository is read-only; only the per-task result directory
+  # beneath evaluation/output is writable.
+  workspace-bench-task:
+    build:
+      context: ../..
+      dockerfile: evaluation/docker/Dockerfile
+      network: host
+    image: workspace-bench:local
+    working_dir: /workspace/Workspace-Bench/evaluation
+    init: true
+    read_only: true
+    cpus: ${WORKSPACE_BENCH_TASK_CPUS:-2}
+    mem_limit: ${WORKSPACE_BENCH_TASK_MEMORY:-8192m}
+    pids_limit: ${WORKSPACE_BENCH_TASK_PIDS:-512}
+    storage_opt:
+      size: ${WORKSPACE_BENCH_TASK_STORAGE:-20480m}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      WORKSPACE_BENCH_ROOT: /workspace/Workspace-Bench
+      WORKSPACE_BENCH_EVAL_ROOT: /workspace/Workspace-Bench/evaluation
+      RIP_BENCH_ROOT: /workspace/Workspace-Bench
+      RIP_BENCH_EVAL_ROOT: /workspace/Workspace-Bench/evaluation
+      DEEPAGENTS_ROOT: /workspace/Workspace-Bench/deepagents
+      CODEX_SANDBOX_MODE: workspace-write
+      HOME: /tmp/home
+      XDG_CACHE_HOME: /tmp/cache
+      PIP_CACHE_DIR: /tmp/pip-cache
+      UV_CACHE_DIR: /tmp/uv-cache
+      npm_config_cache: /tmp/npm-cache
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ../..:/workspace/Workspace-Bench:ro
+      - ../output:/workspace/Workspace-Bench/evaluation/output
+    tmpfs:
+      - /tmp:rw,size=${WORKSPACE_BENCH_TASK_TMPFS:-20480m},mode=1777
+
 volumes:
   pip-cache:
   uv-cache:
