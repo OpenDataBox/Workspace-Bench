@@ -88,6 +88,55 @@ class AgentRunnerOutputCollectionTests(unittest.TestCase):
         self.assertEqual([x["outputPath"] for x in res["case"]["outputFiles"]], ["a.txt"])
         self.assertIn("task_target_output_dir", agent_json["trace"]["outputs"]["retrievalMethod"])
 
+    def test_metadata_with_rubrics_is_not_visible_while_agent_runs(self):
+        observed = {}
+
+        def fake_run(*, prompt, work_dir, sandbox_dir, timeout_s, api_provider):
+            metadata_path = os.path.join(sandbox_dir, "metadata.json")
+            observed["metadata_exists"] = os.path.exists(metadata_path)
+            observed["parent_entries"] = sorted(os.listdir(os.path.dirname(work_dir)))
+            out_dir = os.path.join(work_dir, "model_output")
+            os.makedirs(out_dir, exist_ok=True)
+            self._write_file(out_dir, "a.txt", "answer")
+            return {"status": "ok", "paths": [], "trace": {"lastText": ""}, "metrics": {}}
+
+        meta = {
+            "id": "case",
+            "file_system": "role",
+            "task": "produce output",
+            "rubrics": ["SECRET EVALUATION CRITERION"],
+            "rubric_types": ["content"],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            _, _, case_dir = self._run_case(td, fake_run, meta=meta)
+            with open(os.path.join(case_dir, "metadata.json"), "r", encoding="utf-8") as f:
+                stored_metadata = json.load(f)
+
+        self.assertFalse(observed["metadata_exists"])
+        self.assertNotIn("metadata.json", observed["parent_entries"])
+        self.assertEqual(stored_metadata["rubrics"], meta["rubrics"])
+        self.assertEqual(stored_metadata["rubric_types"], meta["rubric_types"])
+
+    def test_metadata_is_restored_when_agent_run_raises(self):
+        def fake_run(*, prompt, work_dir, sandbox_dir, timeout_s, api_provider):
+            self.assertFalse(os.path.exists(os.path.join(sandbox_dir, "metadata.json")))
+            raise RuntimeError("intentional failure")
+
+        meta = {
+            "id": "case",
+            "file_system": "role",
+            "task": "produce output",
+            "rubrics": ["SECRET EVALUATION CRITERION"],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaisesRegex(RuntimeError, "intentional failure"):
+                self._run_case(td, fake_run, meta=meta)
+            metadata_path = os.path.join(td, "runs", "case", "metadata.json")
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                stored_metadata = json.load(f)
+
+        self.assertEqual(stored_metadata["rubrics"], meta["rubrics"])
+
     def test_mirrors_misplaced_outputs_and_filters_run_artifacts(self):
         def fake_run(*, prompt, work_dir, sandbox_dir, timeout_s, api_provider):
             self._write_file(work_dir, "report.xlsx", "workbook")

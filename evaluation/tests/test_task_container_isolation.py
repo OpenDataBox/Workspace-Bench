@@ -90,7 +90,109 @@ class TaskContainerIsolationTests(unittest.TestCase):
         self.assertIn("pids_limit", task)
         self.assertIn("storage_opt", task)
         self.assertIn("/workspace/Workspace-Bench:ro", task["volumes"][0])
+        self.assertNotIn(
+            "/workspace/Workspace-Bench/evaluation/output",
+            "\n".join(task["volumes"]),
+        )
         self.assertIn("--rm", isolated_runner._compose_command(EVAL_ROOT / "docker" / "docker-compose.yaml", "workspace-bench-task", []))
+
+    def test_agent_task_view_redacts_rubrics_and_restores_full_metadata(self):
+        with tempfile.TemporaryDirectory() as td:
+            eval_root = Path(td)
+            source = eval_root / "tasks_lite" / "case-1"
+            source.mkdir(parents=True)
+            metadata = {
+                "id": "case-1",
+                "task": "Create a report",
+                "data_manifest": [
+                    {
+                        "stored_relpath": "data/attachment.txt",
+                        "target_path": "attachment.txt",
+                    }
+                ],
+                "output_files": ["report.md"],
+                "rubrics": ["SECRET CRITERION"],
+                "rubric_types": ["content"],
+                "rubric_notes": "SECRET NOTES",
+                "judge_metadata": {"secret": True},
+                "ground_truth": "SECRET ANSWER",
+            }
+            (source / "metadata.json").write_text(
+                json.dumps(metadata),
+                encoding="utf-8",
+            )
+            (source / "data").mkdir()
+            (source / "data" / "attachment.txt").write_text("input", encoding="utf-8")
+            (source / "metadata.md").write_text("SECRET RUBRIC NOTES", encoding="utf-8")
+            (source / "output").mkdir()
+            (source / "output" / "reference.txt").write_text("SECRET ANSWER", encoding="utf-8")
+
+            view_root, full_metadata = isolated_runner._prepare_agent_task_view(
+                eval_root,
+                dataset="lite",
+                task_id="case-1",
+                view_token="test-view",
+            )
+            visible_metadata = json.loads(
+                (view_root / "case-1" / "metadata.json").read_text(encoding="utf-8")
+            )
+            self.assertNotIn("rubrics", visible_metadata)
+            self.assertNotIn("rubric_types", visible_metadata)
+            self.assertNotIn("rubric_notes", visible_metadata)
+            self.assertNotIn("judge_metadata", visible_metadata)
+            self.assertNotIn("ground_truth", visible_metadata)
+            self.assertEqual(
+                (view_root / "case-1" / "data" / "attachment.txt").read_text(encoding="utf-8"),
+                "input",
+            )
+            self.assertFalse((view_root / "case-1" / "metadata.md").exists())
+            self.assertFalse((view_root / "case-1" / "output").exists())
+
+            runs_root = eval_root / "output" / "Codex--Test--Run"
+            (runs_root / "case-1").mkdir(parents=True)
+            isolated_runner._restore_evaluation_metadata(
+                runs_root=runs_root,
+                task_id="case-1",
+                metadata=full_metadata,
+            )
+            restored = json.loads(
+                (runs_root / "case-1" / "metadata.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(restored["rubrics"], ["SECRET CRITERION"])
+        self.assertEqual(restored["rubric_types"], ["content"])
+
+    def test_task_container_command_masks_private_dataset_git_and_other_runs(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            view = root / "view"
+            hidden = root / "hidden"
+            run = root / "output" / "Codex--Test--Run"
+            for path in (view, hidden, run):
+                path.mkdir(parents=True)
+            command = isolated_runner._compose_command(
+                EVAL_ROOT / "docker" / "docker-compose.yaml",
+                "workspace-bench-task",
+                ["/bin/true"],
+                volumes=[
+                    (view, isolated_runner.CONTAINER_EVAL_ROOT / "tasks_lite", "ro"),
+                    (hidden, isolated_runner.CONTAINER_EVAL_ROOT / "tasks", "ro"),
+                    (hidden, isolated_runner.CONTAINER_REPO_ROOT / ".git", "ro"),
+                    (hidden, isolated_runner.CONTAINER_EVAL_ROOT / "output", "ro"),
+                    (
+                        run,
+                        isolated_runner.CONTAINER_EVAL_ROOT / "output" / run.name,
+                        "rw",
+                    ),
+                ],
+            )
+            command_text = "\n".join(command)
+
+        self.assertIn("/evaluation/tasks_lite:ro", command_text)
+        self.assertIn("/evaluation/tasks:ro", command_text)
+        self.assertIn("/Workspace-Bench/.git:ro", command_text)
+        self.assertIn("/evaluation/output:ro", command_text)
+        self.assertIn(f"/evaluation/output/{run.name}:rw", command_text)
 
     def test_reset_integration_script_uses_two_removed_task_containers(self):
         script = (EVAL_ROOT / "scripts" / "verify_task_container_reset.py").read_text(encoding="utf-8")

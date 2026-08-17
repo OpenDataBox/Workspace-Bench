@@ -13,15 +13,28 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import uuid
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 
 Json = Any
 DEFAULT_RESOURCES = {"cpus": "2", "memory_mb": 8192, "pids": 512, "storage_mb": 20480}
+CONTAINER_REPO_ROOT = Path("/workspace/Workspace-Bench")
+CONTAINER_EVAL_ROOT = CONTAINER_REPO_ROOT / "evaluation"
+EVALUATION_ONLY_METADATA_KEYS = {
+    "rubrics",
+    "rubric_types",
+    "judge_metadata",
+    "ground_truth",
+    "reference_output",
+}
+EVALUATION_ONLY_METADATA_PREFIXES = ("rubric_", "judge_", "ground_truth_")
 
 
 def _safe_name(value: str) -> str:
@@ -129,12 +142,15 @@ def _compose_command(
     *,
     container_name: str | None = None,
     service_env: dict[str, str] | None = None,
+    volumes: list[tuple[Path, Path, str]] | None = None,
 ) -> list[str]:
     out = ["docker", "compose", "-f", str(compose_file), "run", "--rm", "--no-deps"]
     if container_name:
         out.extend(["--name", container_name])
     for key, value in sorted((service_env or {}).items()):
         out.extend(["-e", f"{key}={value}"])
+    for source, destination, mode in volumes or []:
+        out.extend(["-v", f"{source.resolve()}:{destination}:{mode}"])
     out.append(service)
     out.extend(command)
     return out
@@ -142,6 +158,82 @@ def _compose_command(
 
 def _run(command: list[str], *, cwd: Path, env: dict[str, str], capture: bool = False) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, cwd=str(cwd), env=env, text=True, check=False, capture_output=capture)
+
+
+def _agent_visible_metadata(metadata: dict[str, Json]) -> dict[str, Json]:
+    """Remove fields reserved for post-run evaluation from an agent task view."""
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key not in EVALUATION_ONLY_METADATA_KEYS
+        and not key.startswith(EVALUATION_ONLY_METADATA_PREFIXES)
+    }
+
+
+def _prepare_agent_task_view(
+    eval_root: Path,
+    *,
+    dataset: str,
+    task_id: str,
+    view_token: str,
+) -> tuple[Path, dict[str, Json]]:
+    task_root_name = "tasks" if dataset == "full" else "tasks_lite"
+    source_task_dir = eval_root / task_root_name / task_id
+    metadata_path = source_task_dir / "metadata.json"
+    if not source_task_dir.is_dir() or not metadata_path.is_file():
+        raise SystemExit(f"task source not found: {source_task_dir}")
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise SystemExit(f"invalid metadata: {metadata_path}: {exc}") from exc
+    if not isinstance(metadata, dict):
+        raise SystemExit(f"metadata must be an object: {metadata_path}")
+
+    view_root = eval_root / ".generated" / "agent_task_views" / view_token
+    if view_root.exists():
+        shutil.rmtree(view_root)
+    staged_task_dir = view_root / task_id
+    staged_task_dir.mkdir(parents=True)
+    source_task_resolved = source_task_dir.resolve()
+    data_manifest = metadata.get("data_manifest")
+    for item in data_manifest if isinstance(data_manifest, list) else []:
+        if not isinstance(item, dict):
+            continue
+        stored_relpath = item.get("stored_relpath")
+        if not isinstance(stored_relpath, str) or not stored_relpath.strip():
+            continue
+        source = (source_task_dir / stored_relpath).resolve()
+        try:
+            source.relative_to(source_task_resolved)
+        except ValueError as exc:
+            raise SystemExit(
+                f"data_manifest path escapes task source: {stored_relpath}"
+            ) from exc
+        if not source.is_file():
+            raise SystemExit(f"data_manifest source not found: {source}")
+        destination = staged_task_dir / stored_relpath
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    (staged_task_dir / "metadata.json").write_text(
+        json.dumps(_agent_visible_metadata(metadata), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return view_root, metadata
+
+
+def _restore_evaluation_metadata(
+    *,
+    runs_root: Path,
+    task_id: str,
+    metadata: dict[str, Json],
+) -> None:
+    case_dir = runs_root / _safe_name(task_id)
+    if not case_dir.is_dir():
+        return
+    (case_dir / "metadata.json").write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _build_config(
@@ -256,6 +348,28 @@ def main() -> int:
     failures = 0
     for task_id, config_path in zip(task_ids, configs):
         name = f"workspace-bench-task-{_safe_name(task_id)}-{uuid.uuid4().hex[:8]}"
+        view_token = f"{_safe_name(task_id)}-{uuid.uuid4().hex[:12]}"
+        agent_task_view, evaluation_metadata = _prepare_agent_task_view(
+            eval_root,
+            dataset=dataset,
+            task_id=task_id,
+            view_token=view_token,
+        )
+        hidden_root = eval_root / ".generated" / "agent_task_views" / "_hidden"
+        hidden_root.mkdir(parents=True, exist_ok=True)
+        config = Path(config_path)
+        config_value = yaml.safe_load(config.read_text(encoding="utf-8"))
+        if not isinstance(config_value, dict):
+            raise SystemExit(f"invalid run config: {config}")
+        output_dir = Path(str(config_value.get("output_dir") or ""))
+        runs_root = output_dir / (
+            f"{config_value.get('agent_name')}--"
+            f"{config_value.get('model_name')}--"
+            f"{config_value.get('run_name')}"
+        )
+        runs_root.mkdir(parents=True, exist_ok=True)
+        selected_task_root = "tasks" if dataset == "full" else "tasks_lite"
+        other_task_root = "tasks_lite" if selected_task_root == "tasks" else "tasks"
         task_env = dict(env)
         task_env["WORKSPACE_BENCH_TASK_CONTAINER_NAME"] = name
         command = _compose_command(
@@ -275,10 +389,45 @@ def main() -> int:
                 "WORKSPACE_BENCH_TASK_CONTAINER_NAME": name,
                 "WORKSPACE_BENCH_TASK_IMAGE_DIGEST": image_digest,
             },
+            volumes=[
+                (
+                    agent_task_view,
+                    CONTAINER_EVAL_ROOT / selected_task_root,
+                    "ro",
+                ),
+                (
+                    hidden_root,
+                    CONTAINER_EVAL_ROOT / other_task_root,
+                    "ro",
+                ),
+                (
+                    hidden_root,
+                    CONTAINER_REPO_ROOT / ".git",
+                    "ro",
+                ),
+                (
+                    hidden_root,
+                    CONTAINER_EVAL_ROOT / "output",
+                    "ro",
+                ),
+                (
+                    runs_root,
+                    CONTAINER_EVAL_ROOT / "output" / runs_root.name,
+                    "rw",
+                ),
+            ],
         )
-        result = _run(command, cwd=eval_root, env=task_env)
-        if result.returncode != 0:
-            failures += 1
+        try:
+            result = _run(command, cwd=eval_root, env=task_env)
+            if result.returncode != 0:
+                failures += 1
+        finally:
+            _restore_evaluation_metadata(
+                runs_root=runs_root,
+                task_id=task_id,
+                metadata=evaluation_metadata,
+            )
+            shutil.rmtree(agent_task_view, ignore_errors=True)
 
     aggregate = _compose_command(
         compose_file,

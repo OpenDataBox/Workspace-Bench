@@ -1101,7 +1101,7 @@ def _run_one_case(
         _rmtree_retry(case_dir)
     _ensure_dir(case_dir)
 
-    _write_json(os.path.join(case_dir, "metadata.json"), meta)
+    metadata_output_path = os.path.join(case_dir, "metadata.json")
 
     shared_work_dir = _resolve_work_dir(meta, {str(k): str(v) for k, v in work_dir_map.items()})
     if not shared_work_dir:
@@ -1167,13 +1167,23 @@ def _run_one_case(
     case_started = time.time()
     api_provider2 = dict(api_provider) if isinstance(api_provider, dict) else {}
     api_provider2["__expected_output_files__"] = expected_files
-    run_res = run_fn(
-        prompt=prompt,
-        work_dir=work_dir,
-        sandbox_dir=case_dir,
-        timeout_s=timeout_sec,
-        api_provider=api_provider2,
-    )
+    # Do not materialize task metadata before the agent exits. The case-local
+    # workdir is a child of case_dir, and harnesses may be able to read outside
+    # their current working directory. Writing metadata.json here used to
+    # expose evaluation-only fields such as rubrics to the tested agent.
+    #
+    # The complete metadata is still required by the judge and result tooling,
+    # so restore it in a finally block after run_fn has returned (or raised).
+    try:
+        run_res = run_fn(
+            prompt=prompt,
+            work_dir=work_dir,
+            sandbox_dir=case_dir,
+            timeout_s=timeout_sec,
+            api_provider=api_provider2,
+        )
+    finally:
+        _write_json(metadata_output_path, meta)
     duration_ms = int((time.time() - case_started) * 1000)
 
     status_raw = str(run_res.get("status") or "").strip().lower()
