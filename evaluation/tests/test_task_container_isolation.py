@@ -194,6 +194,23 @@ class TaskContainerIsolationTests(unittest.TestCase):
         self.assertIn("/evaluation/output:ro", command_text)
         self.assertIn(f"/evaluation/output/{run.name}:rw", command_text)
 
+    def test_output_mask_precreates_nested_mountpoint_and_writable_run(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            hidden_root = root / "hidden"
+            runs_root = root / "output" / "Codex--Test--Run"
+
+            empty_root, hidden_output_root = isolated_runner._prepare_container_output_mounts(
+                hidden_root=hidden_root,
+                runs_root=runs_root,
+            )
+
+            self.assertTrue(empty_root.is_dir())
+            self.assertEqual(list(empty_root.iterdir()), [])
+            self.assertTrue((hidden_output_root / runs_root.name).is_dir())
+            self.assertTrue(runs_root.is_dir())
+            self.assertEqual(runs_root.stat().st_mode & 0o777, 0o777)
+
     def test_reset_integration_script_uses_two_removed_task_containers(self):
         script = (EVAL_ROOT / "scripts" / "verify_task_container_reset.py").read_text(encoding="utf-8")
         self.assertIn('"workspace-bench-task"', script)

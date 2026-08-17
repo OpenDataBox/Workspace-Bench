@@ -236,6 +236,25 @@ def _restore_evaluation_metadata(
     )
 
 
+def _prepare_container_output_mounts(
+    *,
+    hidden_root: Path,
+    runs_root: Path,
+) -> tuple[Path, Path]:
+    """Create bind-mount sources before Docker applies the read-only mask."""
+    empty_root = hidden_root / "empty"
+    hidden_output_root = hidden_root / "output"
+    empty_root.mkdir(parents=True, exist_ok=True)
+    (hidden_output_root / runs_root.name).mkdir(parents=True, exist_ok=True)
+
+    # The task container can run under a remapped UID (for example with
+    # root-squash on the host filesystem). It only receives this run directory,
+    # so making the bind source writable does not expose other run results.
+    runs_root.mkdir(parents=True, exist_ok=True)
+    runs_root.chmod(0o777)
+    return empty_root, hidden_output_root
+
+
 def _build_config(
     *, compose_file: Path, eval_root: Path, env: dict[str, str], base_args: list[str], task_id: str, run_name: str, resources: dict[str, Json]
 ) -> str:
@@ -355,8 +374,7 @@ def main() -> int:
             task_id=task_id,
             view_token=view_token,
         )
-        hidden_root = eval_root / ".generated" / "agent_task_views" / "_hidden"
-        hidden_root.mkdir(parents=True, exist_ok=True)
+        hidden_root = eval_root / ".generated" / "agent_task_views" / "_hidden" / view_token
         config = Path(config_path)
         config_value = yaml.safe_load(config.read_text(encoding="utf-8"))
         if not isinstance(config_value, dict):
@@ -367,7 +385,10 @@ def main() -> int:
             f"{config_value.get('model_name')}--"
             f"{config_value.get('run_name')}"
         )
-        runs_root.mkdir(parents=True, exist_ok=True)
+        empty_root, hidden_output_root = _prepare_container_output_mounts(
+            hidden_root=hidden_root,
+            runs_root=runs_root,
+        )
         selected_task_root = "tasks" if dataset == "full" else "tasks_lite"
         other_task_root = "tasks_lite" if selected_task_root == "tasks" else "tasks"
         task_env = dict(env)
@@ -396,17 +417,17 @@ def main() -> int:
                     "ro",
                 ),
                 (
-                    hidden_root,
+                    empty_root,
                     CONTAINER_EVAL_ROOT / other_task_root,
                     "ro",
                 ),
                 (
-                    hidden_root,
+                    empty_root,
                     CONTAINER_REPO_ROOT / ".git",
                     "ro",
                 ),
                 (
-                    hidden_root,
+                    hidden_output_root,
                     CONTAINER_EVAL_ROOT / "output",
                     "ro",
                 ),
@@ -428,6 +449,7 @@ def main() -> int:
                 metadata=evaluation_metadata,
             )
             shutil.rmtree(agent_task_view, ignore_errors=True)
+            shutil.rmtree(hidden_root, ignore_errors=True)
 
     aggregate = _compose_command(
         compose_file,
