@@ -67,7 +67,6 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ../..:/workspace/Workspace-Bench:ro
-      - ../output:/workspace/Workspace-Bench/evaluation/output
     tmpfs:
       - /tmp:rw,size=${WORKSPACE_BENCH_TASK_TMPFS:-20480m},mode=1777
 
