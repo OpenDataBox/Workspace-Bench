@@ -36,7 +36,8 @@
 <br />
 
 ## 📰 News
-* **[August 17, 2026]**: We identified and fixed an evaluation metadata leakage issue in which a tested agent could read task rubrics from `metadata.json` outside its working directory ([Issue #13](https://github.com/OpenDataBox/Workspace-Bench/issues/13)). Results produced with an earlier runner should be audited before publication: inspect the agent execution trace and verify that the agent did not access the current task's source or case-level `metadata.json` (for example, `evaluation/tasks[_lite]/<task_id>/metadata.json` or `evaluation/output/<run>/<task_id>/metadata.json`). Runs whose traces show such access should be treated as potentially contaminated and rerun with the fixed isolated runner.
+* **[August 17, 2026]**: Now we support evaluation on deepseek harness(dsh)。 🎉🎉🎉
+* **[August 17, 2026]**: We identified and fixed an evaluation metadata leakage issue in which a tested agent could read task rubrics from `metadata.json` outside its working directory ([Issue #13](https://github.com/OpenDataBox/Workspace-Bench/issues/13)). 
 * **[July 02, 2026]**: Workspace-Bench-Lite metadata was updated with task language fields, file fixes, and refined rubrics ([huggingface](https://huggingface.co/datasets/Workspace-Bench/Workspace-Bench-Lite)).
 * **[July 02, 2026]**: The runner now supports task-level parallelism and more robust output collection.
 * **[July 02, 2026]**: Task language is now detected automatically to inject English or Chinese prompts.
