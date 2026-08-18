@@ -253,14 +253,41 @@ docker compose -f docker/docker-compose.yaml run --rm workspace-bench \
   --dataset lite
 ```
 
-Supported harness values are `codex`, `openclaw`, `deepagent`, and
-`claudecode`. Common model aliases include `gpt-5.4`, `gemini-3.1-pro`,
+Supported harness values are `codex`, `openclaw`, `deepagent`, `claudecode`,
+and `deepseek-harness` (alias: `dsh`). Common model aliases include `gpt-5.4`, `gemini-3.1-pro`,
 `kimi-k2.5`, `glm-5.1`, `minimax-m2.7`, `grok-4.3`, and `qwen-3.6`.
 When using `claudecode`, the selected model endpoint must be compatible with
 the Anthropic API.
 For a custom provider model, add `--model-id`, `--model-name`, and
 `--env-prefix`.
 Completed run outputs are stored under `evaluation/output/`.
+
+DeepSeek Harness runs through DeepSeek's official Python SDK, pinned to
+`deepseek-harness-sdk==0.1.0rc7`. The adapter also pins the official
+`jsonrpc-agent` minimal Cordis composition from upstream commit `99f6f02` and
+verifies its checksum before each run. It does not start the Web UI. Set a
+DeepSeek-compatible endpoint and credential in `evaluation/.env`, then use the
+task-isolated launcher for reported results:
+
+```dotenv
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_API_KEY=sk-...
+```
+
+```bash
+python3 scripts/run_isolated_benchmark.py \
+  --harness deepseek-harness \
+  --model deepseek-v4-flash \
+  --model-name DeepSeek-V4-Flash \
+  --env-prefix DEEPSEEK \
+  --dataset smoke
+```
+
+The pinned minimal profile exposes persistent Bash and the native string
+replacement editor. Each benchmark task receives a new harness session and,
+with the isolated launcher, a disposable workspace container. Use
+`--dsh-max-tokens` to set an explicit output-token cap when an experiment
+requires one.
 
 ### Run the Full Benchmark
 

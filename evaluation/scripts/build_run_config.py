@@ -73,6 +73,9 @@ def _normalize_harness(value: str) -> str:
         "deepagent": "DeepAgent",
         "claudecode": "ClaudeCode",
         "claude-code": "ClaudeCode",
+        "deepseekharness": "DeepSeekHarness",
+        "deepseek-harness": "DeepSeekHarness",
+        "dsh": "DeepSeekHarness",
     }
     key = value.strip().lower()
     if key not in mapping:
@@ -101,7 +104,7 @@ def _provider_config(harness: str, provider_type: str, env_prefix: str, llm_mode
             "apiKey": f"${{{env_prefix}_API_KEY}}",
         }
     return {
-        "provider_type": provider_type,
+        "provider_type": "deepseek" if harness == "DeepSeekHarness" else provider_type,
         "baseUrl": f"${{{env_prefix}_BASE_URL}}",
         "model": llm_model,
         "apiKey": f"${{{env_prefix}_API_KEY}}",
@@ -201,6 +204,16 @@ def build_config(args: argparse.Namespace) -> Path:
         "eval_yaml": args.eval_yaml,
         "api_provider": _provider_config(harness, args.provider_type, env_prefix, llm_model),
     }
+    if harness == "DeepSeekHarness":
+        max_tokens = getattr(args, "dsh_max_tokens", None)
+        if max_tokens is not None and int(max_tokens) <= 0:
+            raise SystemExit("--dsh-max-tokens must be positive")
+        config["deepseek_harness_runtime"] = {
+            "expected_sdk_version": "0.1.0rc7",
+            "provider": "deepseek-official",
+            "profile": "jsonrpc-agent-minimal-99f6f02",
+            "max_tokens": int(max_tokens) if max_tokens is not None else None,
+        }
     if task_limit is not None:
         config["task_limit"] = int(task_limit)
     elif task_ids:
@@ -215,7 +228,11 @@ def build_config(args: argparse.Namespace) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build a Workspace-Bench run config from parameters.")
-    parser.add_argument("--harness", required=True, help="Codex, OpenClaw, DeepAgent, or ClaudeCode")
+    parser.add_argument(
+        "--harness",
+        required=True,
+        help="Codex, OpenClaw, DeepAgent, ClaudeCode, or DeepSeekHarness (dsh)",
+    )
     parser.add_argument("--model", required=True, help="Model alias or custom model id")
     parser.add_argument("--dataset", default="lite", choices=["smoke", "lite", "full"])
     parser.add_argument("--eval-root", default=str(Path(__file__).resolve().parents[1]))
@@ -233,6 +250,11 @@ def main() -> None:
     )
     selection.add_argument("--persona", help="Run every task whose metadata persona exactly matches this value")
     parser.add_argument("--timeout-sec", type=float, default=2000.0)
+    parser.add_argument(
+        "--dsh-max-tokens",
+        type=int,
+        help="Optional positive output-token cap for DeepSeek Harness root and in-process descendants",
+    )
     parser.add_argument("--task-parallel-workers", type=int, help="Number of isolated task-level workers; defaults to 10")
     parser.add_argument("--no-task-parallel", action="store_true", help="Disable isolated task-level parallelism")
     parser.add_argument(
