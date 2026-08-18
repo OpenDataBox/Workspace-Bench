@@ -1496,7 +1496,11 @@ def main() -> None:
     task_ids = cfg.get("task_ids")
     persona = cfg.get("persona")
     timeout_sec = float(cfg.get("timeout_sec") or 300.0)
-    api_provider = cfg.get("api_provider") if isinstance(cfg.get("api_provider"), dict) else {}
+    api_provider = dict(cfg.get("api_provider")) if isinstance(cfg.get("api_provider"), dict) else {}
+    if isinstance(cfg.get("deepseek_harness_runtime"), dict):
+        api_provider["__deepseek_harness_runtime__"] = dict(
+            cfg["deepseek_harness_runtime"]
+        )
 
     eval_while_running = cfg.get("eval_while_running") or False
     eval_yaml = str(cfg.get("eval_yaml") or "").strip()

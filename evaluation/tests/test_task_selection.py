@@ -108,6 +108,7 @@ class BuildRunConfigTaskSelectionTests(unittest.TestCase):
             "timeout_sec": 10.0,
             "eval_yaml": "runs/judge.yaml",
             "provider_type": "openai",
+            "dsh_max_tokens": None,
         }
         values.update(overrides)
         return argparse.Namespace(**values)
@@ -165,6 +166,41 @@ class BuildRunConfigTaskSelectionTests(unittest.TestCase):
         self.assertEqual(selected["task_ids"], ["45"])
         self.assertNotIn("task_limit", selected)
         self.assertEqual(default["task_limit"], 1)
+
+    def test_deepseek_harness_alias_builds_pinned_runtime_config(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = build_run_config.build_config(
+                self._args(
+                    td,
+                    harness="dsh",
+                    model="deepseek-v4-flash",
+                    model_name="DeepSeek-V4-Flash",
+                    env_prefix="DEEPSEEK",
+                    dsh_max_tokens=49152,
+                )
+            )
+            config = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(config["agent_name"], "DeepSeekHarness")
+        self.assertEqual(config["api_provider"]["provider_type"], "deepseek")
+        self.assertEqual(config["api_provider"]["baseUrl"], "${DEEPSEEK_BASE_URL}")
+        self.assertEqual(config["api_provider"]["apiKey"], "${DEEPSEEK_API_KEY}")
+        self.assertEqual(
+            config["deepseek_harness_runtime"],
+            {
+                "expected_sdk_version": "0.1.0rc7",
+                "provider": "deepseek-official",
+                "profile": "jsonrpc-agent-minimal-99f6f02",
+                "max_tokens": 49152,
+            },
+        )
+
+    def test_deepseek_harness_rejects_non_positive_token_cap(self):
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaisesRegex(SystemExit, "must be positive"):
+                build_run_config.build_config(
+                    self._args(td, harness="deepseek-harness", dsh_max_tokens=0)
+                )
 
 
 if __name__ == "__main__":

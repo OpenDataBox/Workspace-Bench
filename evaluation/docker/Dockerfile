@@ -24,7 +24,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3 -m pip install --no-cache-dir --break-system-packages \
     tqdm \
     pyyaml \
-    uv
+    uv \
+    deepseek-harness-sdk==0.1.0rc7
+
+RUN test "$(python3 -c 'from importlib.metadata import version; print(version("deepseek-harness-sdk"))')" = "0.1.0rc7"
 
 RUN npm install -g openclaw @openai/codex@0.130.0
 
