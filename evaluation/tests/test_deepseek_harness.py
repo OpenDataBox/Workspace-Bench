@@ -83,7 +83,7 @@ class DeepSeekHarnessAdapterTests(unittest.TestCase):
             "__deepseek_harness_runtime__": {
                 "expected_sdk_version": "0.1.0rc7",
                 "provider": "deepseek-official",
-                "profile": "jsonrpc-agent-minimal-99f6f02",
+                "profile": "jsonrpc-agent-office-skills-12c3f46",
                 "max_tokens": 49152,
             },
         }
@@ -137,25 +137,40 @@ class DeepSeekHarnessAdapterTests(unittest.TestCase):
         self.assertEqual(_FakeHarness.last_kwargs["max_tokens"], 49152)
         self.assertEqual(
             _FakeHarness.last_kwargs["cordis"],
-            deepseekharness.DEEPSEEK_HARNESS_CORDIS_PATH,
+            deepseekharness._profile_spec(deepseekharness.DEEPSEEK_HARNESS_PROFILE)["cordis_path"],
+        )
+        self.assertEqual(
+            _FakeHarness.last_kwargs["env"],
+            {"WORKSPACE_BENCH_DSH_SKILLS_DIR": deepseekharness.DEEPSEEK_HARNESS_SKILLS_DIR},
         )
         self.assertEqual(_FakeHarness.last_kwargs["request_timeout_seconds"], 123)
         self.assertEqual(_FakeHarness.last_session_id, "workspace-bench-task-45")
         self.assertEqual(config["sdkVersion"], "0.1.0rc7")
-        self.assertEqual(config["profile"], "jsonrpc-agent-minimal-99f6f02")
+        self.assertEqual(config["profile"], "jsonrpc-agent-office-skills-12c3f46")
         self.assertEqual(
             config["cordisSha256"],
-            "4ddf99b5492fac7b578e3caddb0158815e44d5db176ba0aeab57012d35299fca",
+            "12c3f46e55a2306197b7811844430c21ff7736a643e74acb33fded6b42e127c4",
         )
+        self.assertTrue(config["skillsEnabled"])
+        self.assertEqual(config["skillsDir"], deepseekharness.DEEPSEEK_HARNESS_SKILLS_DIR)
         self.assertNotIn("secret-key", json.dumps(config))
         self.assertNotIn("https://provider.example/v1", json.dumps(config))
         self.assertIn('"type": "assistant/message"', events)
 
-    def test_pinned_minimal_cordis_checksum(self):
+    def test_pinned_cordis_profiles_and_office_skills_config(self):
+        minimal = deepseekharness._profile_spec("jsonrpc-agent-minimal-99f6f02")
+        office = deepseekharness._profile_spec(deepseekharness.DEEPSEEK_HARNESS_PROFILE)
         self.assertEqual(
-            deepseekharness._cordis_sha256(),
-            deepseekharness.DEEPSEEK_HARNESS_CORDIS_SHA256,
+            deepseekharness._cordis_sha256(minimal["cordis_path"]),
+            minimal["cordis_sha256"],
         )
+        self.assertEqual(deepseekharness._cordis_sha256(office["cordis_path"]), office["cordis_sha256"])
+        office_text = Path(office["cordis_path"]).read_text(encoding="utf-8")
+        self.assertIn("@deepseek-ai/dsh-agent-spine-demo", office_text)
+        self.assertIn("skills:\n      enabled: true", office_text)
+        self.assertIn("includeDefaultRoots: false", office_text)
+        self.assertIn("customSkillDirs:", office_text)
+        self.assertIn("WORKSPACE_BENCH_DSH_SKILLS_DIR", office_text)
 
     def test_usage_sums_model_requests_without_double_counting_nested_usage(self):
         events = [
@@ -213,7 +228,7 @@ class DeepSeekHarnessAdapterTests(unittest.TestCase):
         self.assertIn("version mismatch", result["errorMessage"])
         self.assertIn("0.1.0rc6", result["errorMessage"])
 
-    def test_profile_mismatch_fails_closed(self):
+    def test_unknown_profile_fails_closed(self):
         provider = self._provider()
         provider["__deepseek_harness_runtime__"]["profile"] = "some-other-profile"
         with tempfile.TemporaryDirectory() as td:
@@ -226,7 +241,7 @@ class DeepSeekHarnessAdapterTests(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "error")
-        self.assertIn("profile mismatch", result["errorMessage"])
+        self.assertIn("unsupported DeepSeek Harness profile", result["errorMessage"])
 
     def test_sdk_timeout_maps_to_runner_timeout_and_redacts_credentials(self):
         class TimeoutHarness(_FakeHarness):

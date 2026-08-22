@@ -72,6 +72,8 @@ RUN test "$(python3 -c 'from importlib.metadata import version; print(version("d
 
 RUN npm install -g openclaw @openai/codex@0.130.0
 
+ENV WORKSPACE_BENCH_DSH_SKILLS_DIR=/opt/workspace-bench/agent-homes/dsh/.dsh/skills
+
 COPY evaluation/docker/office-runtime.package.json /opt/workspace-bench/office-runtime/package.json
 RUN npm install --prefix "$WORKSPACE_BENCH_OFFICE_RUNTIME" --omit=dev
 
@@ -85,6 +87,7 @@ RUN mkdir -p \
       "$WORKSPACE_BENCH_CLAUDE_CONFIG_DIR/skills" \
       "$WORKSPACE_BENCH_OPENCLAW_SKILLS_DIR" \
       "$WORKSPACE_BENCH_DEEPAGENTS_SKILLS_DIR" \
+      "$WORKSPACE_BENCH_DSH_SKILLS_DIR" \
     && for skill in docx pdfs slides spreadsheets; do \
          cp -a "$WORKSPACE_BENCH_OFFICE_SKILLS/$skill" "$CODEX_HOME/skills/"; \
        done \
@@ -92,7 +95,10 @@ RUN mkdir -p \
          cp -a "$WORKSPACE_BENCH_OFFICE_SKILLS/$skill" "$WORKSPACE_BENCH_CLAUDE_CONFIG_DIR/skills/"; \
        done \
     && cp -a "$WORKSPACE_BENCH_OFFICE_SKILLS/." "$WORKSPACE_BENCH_OPENCLAW_SKILLS_DIR/" \
-    && cp -a "$WORKSPACE_BENCH_OFFICE_SKILLS/." "$WORKSPACE_BENCH_DEEPAGENTS_SKILLS_DIR/"
+    && cp -a "$WORKSPACE_BENCH_OFFICE_SKILLS/." "$WORKSPACE_BENCH_DEEPAGENTS_SKILLS_DIR/" \
+    && for skill in docx pdf pptx xlsx; do \
+         cp -a "$WORKSPACE_BENCH_OFFICE_SKILLS/$skill" "$WORKSPACE_BENCH_DSH_SKILLS_DIR/"; \
+       done
 
 RUN command -v soffice \
     && command -v pandoc \
@@ -127,6 +133,9 @@ RUN for skill in docx pdfs slides spreadsheets; do \
     && for skill in docx pdf pdfs pptx slides xlsx spreadsheets; do \
       test -f "$WORKSPACE_BENCH_OPENCLAW_SKILLS_DIR/$skill/SKILL.md"; \
       test -f "$WORKSPACE_BENCH_DEEPAGENTS_SKILLS_DIR/$skill/SKILL.md"; \
+    done \
+    && for skill in docx pdf pptx xlsx; do \
+      test -f "$WORKSPACE_BENCH_DSH_SKILLS_DIR/$skill/SKILL.md"; \
     done
 
 WORKDIR /workspace/Workspace-Bench/evaluation

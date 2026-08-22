@@ -16,19 +16,26 @@ Json = Any
 DEEPSEEK_HARNESS_DISTRIBUTION = "deepseek-harness-sdk"
 DEEPSEEK_HARNESS_SDK_VERSION = "0.1.0rc7"
 DEEPSEEK_HARNESS_PROVIDER = "deepseek-official"
-DEEPSEEK_HARNESS_PROFILE = "jsonrpc-agent-minimal-99f6f02"
-DEEPSEEK_HARNESS_CORDIS_SHA256 = (
-    "4ddf99b5492fac7b578e3caddb0158815e44d5db176ba0aeab57012d35299fca"
+DEEPSEEK_HARNESS_VENDOR_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "vendor", "deepseek-harness")
 )
-DEEPSEEK_HARNESS_CORDIS_PATH = os.path.abspath(
-    os.path.join(
-        os.path.dirname(__file__),
-        "..",
-        "..",
-        "vendor",
-        "deepseek-harness",
-        "minimal.cordis.yml",
-    )
+DEEPSEEK_HARNESS_PROFILES = {
+    # Retain the prior benchmark composition for existing generated configs.
+    "jsonrpc-agent-minimal-99f6f02": {
+        "cordis_path": os.path.join(DEEPSEEK_HARNESS_VENDOR_ROOT, "minimal.cordis.yml"),
+        "cordis_sha256": "4ddf99b5492fac7b578e3caddb0158815e44d5db176ba0aeab57012d35299fca",
+    },
+    # The default profile keeps the same minimal tool surface and adds only
+    # DeepSeek Harness's official filesystem skill provider + `skill` loader.
+    "jsonrpc-agent-office-skills-12c3f46": {
+        "cordis_path": os.path.join(DEEPSEEK_HARNESS_VENDOR_ROOT, "office-skills.cordis.yml"),
+        "cordis_sha256": "12c3f46e55a2306197b7811844430c21ff7736a643e74acb33fded6b42e127c4",
+    },
+}
+DEEPSEEK_HARNESS_PROFILE = "jsonrpc-agent-office-skills-12c3f46"
+DEEPSEEK_HARNESS_SKILLS_DIR = (
+    os.environ.get("WORKSPACE_BENCH_DSH_SKILLS_DIR")
+    or "/opt/workspace-bench/agent-homes/dsh/.dsh/skills"
 )
 
 
@@ -364,9 +371,20 @@ def _sdk_version() -> str:
     return importlib_metadata.version(DEEPSEEK_HARNESS_DISTRIBUTION)
 
 
-def _cordis_sha256() -> str:
+def _profile_spec(profile: str) -> Dict[str, str]:
+    spec = DEEPSEEK_HARNESS_PROFILES.get(profile)
+    if not isinstance(spec, dict):
+        raise ValueError(f"unsupported DeepSeek Harness profile: {profile}")
+    path = spec.get("cordis_path")
+    checksum = spec.get("cordis_sha256")
+    if not isinstance(path, str) or not isinstance(checksum, str):
+        raise ValueError(f"invalid DeepSeek Harness profile: {profile}")
+    return {"cordis_path": path, "cordis_sha256": checksum}
+
+
+def _cordis_sha256(cordis_path: str | None = None) -> str:
     digest = hashlib.sha256()
-    with open(DEEPSEEK_HARNESS_CORDIS_PATH, "rb") as handle:
+    with open(cordis_path or _profile_spec(DEEPSEEK_HARNESS_PROFILE)["cordis_path"], "rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -479,26 +497,29 @@ def run(
             raw_dir=raw_dir,
             started_at=started_at,
         )
-    if profile != DEEPSEEK_HARNESS_PROFILE:
+    try:
+        profile_spec = _profile_spec(profile)
+    except ValueError as error:
         return _error_result(
-            "DeepSeek Harness profile mismatch: "
-            f"required {DEEPSEEK_HARNESS_PROFILE}, config {profile}",
+            str(error),
             raw_dir=raw_dir,
             started_at=started_at,
         )
 
     try:
-        cordis_sha256 = _cordis_sha256()
+        cordis_path = profile_spec["cordis_path"]
+        expected_cordis_sha256 = profile_spec["cordis_sha256"]
+        cordis_sha256 = _cordis_sha256(cordis_path)
     except OSError as error:
         return _error_result(
             f"Unable to read pinned DeepSeek Harness Cordis config: {error}",
             raw_dir=raw_dir,
             started_at=started_at,
         )
-    if cordis_sha256 != DEEPSEEK_HARNESS_CORDIS_SHA256:
+    if cordis_sha256 != expected_cordis_sha256:
         return _error_result(
             "DeepSeek Harness Cordis config checksum mismatch: "
-            f"required {DEEPSEEK_HARNESS_CORDIS_SHA256}, found {cordis_sha256}",
+            f"required {expected_cordis_sha256}, found {cordis_sha256}",
             raw_dir=raw_dir,
             started_at=started_at,
         )
@@ -530,8 +551,14 @@ def run(
         "model": model,
         "maxTokens": max_tokens,
         "profile": profile,
-        "cordisPath": DEEPSEEK_HARNESS_CORDIS_PATH,
+        "cordisPath": cordis_path,
         "cordisSha256": cordis_sha256,
+        "skillsEnabled": profile == DEEPSEEK_HARNESS_PROFILE,
+        "skillsDir": (
+            DEEPSEEK_HARNESS_SKILLS_DIR
+            if profile == DEEPSEEK_HARNESS_PROFILE
+            else None
+        ),
         "cwd": os.path.abspath(work_dir),
         "sessionRoot": os.path.abspath(session_root),
         "sessionId": session_id,
@@ -557,10 +584,15 @@ def run(
             max_tokens=max_tokens,
             cwd=os.path.abspath(work_dir),
             session_root=os.path.abspath(session_root),
-            cordis=DEEPSEEK_HARNESS_CORDIS_PATH,
+            cordis=cordis_path,
             request_timeout_seconds=request_timeout,
             base_url=base_url,
             api_key=api_key,
+            env=(
+                {"WORKSPACE_BENCH_DSH_SKILLS_DIR": DEEPSEEK_HARNESS_SKILLS_DIR}
+                if profile == DEEPSEEK_HARNESS_PROFILE
+                else {}
+            ),
         ) as harness:
             result = harness.run(str(prompt or ""), session_id=session_id)
         final_text = str(result.final_response or "")

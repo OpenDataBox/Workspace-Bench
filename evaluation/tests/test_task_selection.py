@@ -190,7 +190,7 @@ class BuildRunConfigTaskSelectionTests(unittest.TestCase):
             {
                 "expected_sdk_version": "0.1.0rc7",
                 "provider": "deepseek-official",
-                "profile": "jsonrpc-agent-minimal-99f6f02",
+                "profile": "jsonrpc-agent-office-skills-12c3f46",
                 "max_tokens": 49152,
             },
         )

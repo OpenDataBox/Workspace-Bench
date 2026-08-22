@@ -264,9 +264,13 @@ For a custom provider model, add `--model-id`, `--model-name`, and
 Completed run outputs are stored under `evaluation/output/`.
 
 DeepSeek Harness runs through DeepSeek's official Python SDK, pinned to
-`deepseek-harness-sdk==0.1.0rc7`. The adapter also pins the official
-`jsonrpc-agent` minimal Cordis composition from upstream commit `99f6f02` and
-verifies its checksum before each run. It does not start the Web UI. Set a
+`deepseek-harness-sdk==0.1.0rc7`. The adapter pins a Workspace-Bench Cordis
+profile derived from the official `jsonrpc-agent` minimal composition at
+upstream commit `99f6f02` and verifies its checksum before each run. The
+default profile keeps persistent Bash and the native string-replacement editor,
+then enables DeepSeek Harness's official filesystem Skill provider and
+model-facing `skill` loader for the image-installed Office skills only. It does
+not start the Web UI or scan task-local/user-local Skill roots. Set a
 DeepSeek-compatible endpoint and credential in `evaluation/.env`, then use the
 task-isolated launcher for reported results:
 
@@ -284,9 +288,8 @@ python3 scripts/run_isolated_benchmark.py \
   --dataset smoke
 ```
 
-The pinned minimal profile exposes persistent Bash and the native string
-replacement editor. Each benchmark task receives a new harness session and,
-with the isolated launcher, a disposable workspace container. Use
+Each benchmark task receives a new harness session and, with the isolated
+launcher, a disposable workspace container. Use
 `--dsh-max-tokens` to set an explicit output-token cap when an experiment
 requires one.
 
