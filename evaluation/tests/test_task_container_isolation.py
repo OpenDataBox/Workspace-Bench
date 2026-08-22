@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
@@ -83,18 +84,86 @@ class TaskContainerIsolationTests(unittest.TestCase):
     def test_compose_task_service_has_required_reset_and_resource_controls(self):
         compose = yaml.safe_load((EVAL_ROOT / "docker" / "docker-compose.yaml").read_text(encoding="utf-8"))
         task = compose["services"]["workspace-bench-task"]
+        quota_compose = yaml.safe_load(
+            (EVAL_ROOT / "docker" / "docker-compose.storage-quota.yaml").read_text(encoding="utf-8")
+        )
+        quota_task = quota_compose["services"]["workspace-bench-task"]
         self.assertTrue(task["read_only"])
         self.assertTrue(task["init"])
         self.assertIn("cpus", task)
         self.assertIn("mem_limit", task)
         self.assertIn("pids_limit", task)
-        self.assertIn("storage_opt", task)
+        self.assertNotIn("storage_opt", task)
+        self.assertIn("storage_opt", quota_task)
         self.assertIn("/workspace/Workspace-Bench:ro", task["volumes"][0])
         self.assertNotIn(
             "/workspace/Workspace-Bench/evaluation/output",
             "\n".join(task["volumes"]),
         )
         self.assertIn("--rm", isolated_runner._compose_command(EVAL_ROOT / "docker" / "docker-compose.yaml", "workspace-bench-task", []))
+
+    def test_task_command_uses_storage_quota_override(self):
+        compose_file = EVAL_ROOT / "docker" / "docker-compose.yaml"
+        quota_file = compose_file.with_name("docker-compose.storage-quota.yaml")
+        command = isolated_runner._compose_command(
+            compose_file,
+            "workspace-bench-task",
+            ["/bin/true"],
+            compose_overrides=[quota_file],
+        )
+        self.assertEqual(
+            command[:8],
+            ["docker", "compose", "-f", str(compose_file), "-f", str(quota_file), "run", "--rm"],
+        )
+
+    def test_storage_quota_probe_falls_back_when_driver_rejects_it(self):
+        compose_file = EVAL_ROOT / "docker" / "docker-compose.yaml"
+        quota_file = compose_file.with_name("docker-compose.storage-quota.yaml")
+        unsupported = subprocess.CompletedProcess(
+            [],
+            1,
+            stdout="",
+            stderr="Error response from daemon: --storage-opt is supported only for overlay over xfs with 'pquota' mount option",
+        )
+        calls: list[tuple[list[str], dict[str, str]]] = []
+
+        def fake_run(command, *, cwd, env, capture=False):
+            calls.append((list(command), dict(env)))
+            return unsupported
+
+        with mock.patch.object(isolated_runner, "_run", side_effect=fake_run):
+            storage_quota_enforced = isolated_runner._storage_quota_available(
+                compose_file=compose_file,
+                cwd=EVAL_ROOT,
+                env={"EXAMPLE": "1"},
+            )
+
+        self.assertFalse(storage_quota_enforced)
+        self.assertEqual(len(calls), 1)
+        self.assertIn(str(quota_file), calls[0][0])
+
+    def test_storage_quota_probe_keeps_layer_quota_when_supported(self):
+        compose_file = EVAL_ROOT / "docker" / "docker-compose.yaml"
+        supported = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        with mock.patch.object(isolated_runner, "_run", return_value=supported) as run:
+            storage_quota_enforced = isolated_runner._storage_quota_available(
+                compose_file=compose_file,
+                cwd=EVAL_ROOT,
+                env={"EXAMPLE": "1"},
+            )
+
+        self.assertTrue(storage_quota_enforced)
+        self.assertIn(
+            str(compose_file.with_name("docker-compose.storage-quota.yaml")),
+            run.call_args.args[0],
+        )
+
+    def test_task_entry_records_storage_quota_mode(self):
+        with mock.patch.dict(os.environ, {"WORKSPACE_BENCH_TASK_STORAGE_QUOTA_MODE": "case-directory-watchdog"}):
+            self.assertEqual(task_entry._storage_quota_mode(), "case-directory-watchdog")
+        with mock.patch.dict(os.environ, {"WORKSPACE_BENCH_TASK_STORAGE_QUOTA_MODE": "unexpected"}):
+            self.assertEqual(task_entry._storage_quota_mode(), "docker-layer")
 
     def test_agent_task_view_redacts_rubrics_and_restores_full_metadata(self):
         with tempfile.TemporaryDirectory() as td:
@@ -246,6 +315,11 @@ class TaskContainerIsolationTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            (case_dir / "raw").mkdir()
+            (case_dir / "raw" / "container-isolation.json").write_text(
+                json.dumps({"storageQuotaMode": "case-directory-watchdog"}),
+                encoding="utf-8",
+            )
             result = subprocess.run(
                 [
                     sys.executable,
@@ -262,6 +336,7 @@ class TaskContainerIsolationTests(unittest.TestCase):
             report = json.loads((case_dir.parent / "agent_runner_report.json").read_text(encoding="utf-8"))
             self.assertEqual(report["summary"], {"total": 1, "passed": 1, "failed": 0, "error": 0, "timeout": 0})
             self.assertEqual(report["isolation"]["mode"], "per-task-container")
+            self.assertEqual(report["isolation"]["storageQuotaModes"], ["case-directory-watchdog"])
             self.assertNotIn("apiKey", report["config"]["api_provider"])
 
 

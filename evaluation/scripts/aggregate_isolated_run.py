@@ -47,6 +47,21 @@ def _case_from_agent(case_id: str, case_dir: Path, agent: dict[str, Json]) -> di
     }
 
 
+def _storage_quota_modes(runs_root: Path, task_ids: list[str]) -> list[str]:
+    modes: set[str] = set()
+    for task_id in task_ids:
+        path = runs_root / _safe_name(task_id) / "raw" / "container-isolation.json"
+        if not path.is_file():
+            continue
+        try:
+            value = _read_json(path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict) and isinstance(value.get("storageQuotaMode"), str):
+            modes.add(value["storageQuotaMode"])
+    return sorted(modes)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Aggregate separately containerized task runs.")
     parser.add_argument("--run-config", required=True)
@@ -101,6 +116,7 @@ def main() -> None:
             "mode": "per-task-container",
             "containerRemoval": "docker compose run --rm",
             "evidenceFile": "<case>/raw/container-isolation.json",
+            "storageQuotaModes": _storage_quota_modes(runs_root, list(args.task_ids)),
         },
     }
     runs_root.mkdir(parents=True, exist_ok=True)

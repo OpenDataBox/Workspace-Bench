@@ -27,6 +27,12 @@ Json = Any
 DEFAULT_RESOURCES = {"cpus": "2", "memory_mb": 8192, "pids": 512, "storage_mb": 20480}
 CONTAINER_REPO_ROOT = Path("/workspace/Workspace-Bench")
 CONTAINER_EVAL_ROOT = CONTAINER_REPO_ROOT / "evaluation"
+STORAGE_QUOTA_UNSUPPORTED_MARKERS = (
+    "--storage-opt is supported only for overlay over xfs with 'pquota' mount option",
+    "storage-opt is supported only for overlay over xfs with 'pquota' mount option",
+    "storage-opt is not supported",
+    "storage_opt is not supported",
+)
 EVALUATION_ONLY_METADATA_KEYS = {
     "rubrics",
     "rubric_types",
@@ -140,11 +146,15 @@ def _compose_command(
     service: str,
     command: list[str],
     *,
+    compose_overrides: list[Path] | None = None,
     container_name: str | None = None,
     service_env: dict[str, str] | None = None,
     volumes: list[tuple[Path, Path, str]] | None = None,
 ) -> list[str]:
-    out = ["docker", "compose", "-f", str(compose_file), "run", "--rm", "--no-deps"]
+    out = ["docker", "compose", "-f", str(compose_file)]
+    for override in compose_overrides or []:
+        out.extend(["-f", str(override)])
+    out.extend(["run", "--rm", "--no-deps"])
     if container_name:
         out.extend(["--name", container_name])
     for key, value in sorted((service_env or {}).items()):
@@ -158,6 +168,56 @@ def _compose_command(
 
 def _run(command: list[str], *, cwd: Path, env: dict[str, str], capture: bool = False) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, cwd=str(cwd), env=env, text=True, check=False, capture_output=capture)
+
+
+def _storage_quota_unsupported(result: subprocess.CompletedProcess[str]) -> bool:
+    if result.returncode == 0:
+        return False
+    output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    return any(marker.lower() in output for marker in STORAGE_QUOTA_UNSUPPORTED_MARKERS)
+
+
+def _storage_quota_override(compose_file: Path) -> Path:
+    return compose_file.with_name("docker-compose.storage-quota.yaml")
+
+
+def _storage_quota_available(
+    *,
+    compose_file: Path,
+    cwd: Path,
+    env: dict[str, str],
+) -> bool:
+    """Probe Docker's task-layer quota support once before task execution.
+
+    The regular task command keeps streaming its output after this preflight.
+    If the host rejects ``storage_opt.size``, the launcher uses the same
+    disposable task service without the quota override and relies on the
+    independent case-directory watchdog.
+    """
+    quota_override = _storage_quota_override(compose_file)
+    if not quota_override.is_file():
+        return False
+    command = _compose_command(
+        compose_file,
+        "workspace-bench-task",
+        ["bash", "-lc", "true"],
+        compose_overrides=[quota_override],
+    )
+    result = _run(command, cwd=cwd, env=env, capture=True)
+    if result.returncode == 0:
+        return True
+    if _storage_quota_unsupported(result):
+        print(
+            "[warn] Docker storage_opt.size is unsupported on this host; "
+            "using the task case-directory storage watchdog fallback.",
+            file=sys.stderr,
+        )
+        return False
+    raise SystemExit(
+        result.stderr
+        or result.stdout
+        or "failed to probe Docker task storage quota support"
+    )
 
 
 def _agent_visible_metadata(metadata: dict[str, Json]) -> dict[str, Json]:
@@ -332,6 +392,7 @@ def main() -> int:
             "WORKSPACE_BENCH_TASK_STORAGE": f"{resources['storage_mb']}m",
             "WORKSPACE_BENCH_TASK_STORAGE_MB": str(resources["storage_mb"]),
             "WORKSPACE_BENCH_TASK_TMPFS": f"{resources['storage_mb']}m",
+            "WORKSPACE_BENCH_TASK_STORAGE_QUOTA_MODE": "docker-layer",
         }
     )
 
@@ -355,6 +416,12 @@ def main() -> int:
     prepared = _run(prepare, cwd=eval_root, env=env)
     if prepared.returncode != 0:
         return prepared.returncode
+
+    storage_quota_enforced = _storage_quota_available(
+        compose_file=compose_file,
+        cwd=eval_root,
+        env=env,
+    )
 
     image = _run(
         ["docker", "image", "inspect", "--format={{.Id}}", "workspace-bench:local"],
@@ -393,6 +460,8 @@ def main() -> int:
         other_task_root = "tasks_lite" if selected_task_root == "tasks" else "tasks"
         task_env = dict(env)
         task_env["WORKSPACE_BENCH_TASK_CONTAINER_NAME"] = name
+        if not storage_quota_enforced:
+            task_env["WORKSPACE_BENCH_TASK_STORAGE_QUOTA_MODE"] = "case-directory-watchdog"
         command = _compose_command(
             compose_file,
             "workspace-bench-task",
@@ -405,6 +474,7 @@ def main() -> int:
                 "--task-id",
                 task_id,
             ],
+            compose_overrides=[_storage_quota_override(compose_file)] if storage_quota_enforced else [],
             container_name=name,
             service_env={
                 "WORKSPACE_BENCH_TASK_CONTAINER_NAME": name,

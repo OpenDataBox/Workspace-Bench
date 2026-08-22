@@ -48,8 +48,10 @@ services:
     cpus: ${WORKSPACE_BENCH_TASK_CPUS:-2}
     mem_limit: ${WORKSPACE_BENCH_TASK_MEMORY:-8192m}
     pids_limit: ${WORKSPACE_BENCH_TASK_PIDS:-512}
-    storage_opt:
-      size: ${WORKSPACE_BENCH_TASK_STORAGE:-20480m}
+    # XFS project quotas are not available on every Docker host. The launcher
+    # normally adds docker-compose.storage-quota.yaml, then retries this base
+    # service if Docker rejects storage_opt.size. task_container_entry.py still
+    # enforces the per-case storage budget in either mode.
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -69,6 +71,7 @@ services:
       WORKSPACE_BENCH_CLAUDE_CONFIG_DIR: /opt/workspace-bench/agent-homes/claude/.claude
       WORKSPACE_BENCH_OPENCLAW_SKILLS_DIR: /opt/workspace-bench/agent-homes/openclaw/.openclaw/skills
       WORKSPACE_BENCH_DEEPAGENTS_SKILLS_DIR: /opt/workspace-bench/agent-homes/deepagents/.deepagents/skills
+      WORKSPACE_BENCH_TASK_STORAGE_QUOTA_MODE: ${WORKSPACE_BENCH_TASK_STORAGE_QUOTA_MODE:-docker-layer}
       HOME: /tmp/home
       XDG_CACHE_HOME: /tmp/cache
       PIP_CACHE_DIR: /tmp/pip-cache

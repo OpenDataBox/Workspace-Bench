@@ -36,7 +36,12 @@ same resource budget. To change the published profile, pass
 `--task-cpus`, `--task-memory-mb`, `--task-pids`, and
 `--task-storage-mb`; record the chosen values with the results. Docker storage
 quotas require a storage driver that supports `storage_opt.size`; the
-case-directory watchdog remains active independently of that driver.
+launcher first requests that Docker layer quota through its Compose override.
+If Docker rejects it (for example, overlay storage without XFS `pquota`), the
+launcher retries the same disposable, read-only task container without that
+layer quota. The case-directory watchdog remains active independently of the
+driver, and each `<case>/raw/container-isolation.json` records
+`storageQuotaMode` as either `docker-layer` or `case-directory-watchdog`.
 
 After building the image, run the reset integration check to verify that task
 containers are removed and that a successor cannot observe its predecessor's
