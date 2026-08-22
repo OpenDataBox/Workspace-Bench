@@ -1,0 +1,14 @@
+{
+  "name": "workspace-bench-office-runtime",
+  "private": true,
+  "description": "Shared Node.js dependencies for Office and PDF artifact tasks.",
+  "dependencies": {
+    "docx": "^9.6.1",
+    "pdf-lib": "^1.17.1",
+    "pptxgenjs": "^4.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-icons": "^5.5.0",
+    "sharp": "^0.34.0"
+  }
+}

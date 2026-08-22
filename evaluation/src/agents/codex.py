@@ -108,6 +108,29 @@ def _codex_sandbox_mode() -> str:
     return "workspace-write"
 
 
+def _materialize_codex_home(sandbox_dir: str) -> Optional[str]:
+    """Copy image-installed Codex configuration into a writable case directory.
+
+    The task-isolation service makes the container filesystem read-only. Codex
+    discovers skills under ``$CODEX_HOME/skills`` but may also write ephemeral
+    state under that root, so the immutable Docker image location is a template
+    rather than the live home for an individual task.
+    """
+    template = str(
+        os.environ.get("WORKSPACE_BENCH_CODEX_HOME_TEMPLATE")
+        or os.environ.get("CODEX_HOME")
+        or ""
+    ).strip()
+    if not template or not os.path.isdir(template):
+        return None
+    destination = os.path.join(os.path.abspath(sandbox_dir), "codex_home", ".codex")
+    try:
+        shutil.copytree(template, destination, dirs_exist_ok=True)
+    except OSError:
+        return None
+    return destination
+
+
 def _normalize_base_url(base_url: Optional[str]) -> str:
     if isinstance(base_url, str) and base_url.strip():
         return base_url.strip().rstrip("/")
@@ -649,6 +672,9 @@ def run(
 
     env = os.environ.copy()
     env["CODEX_API_KEY"] = provider_api_key
+    runtime_codex_home = _materialize_codex_home(sandbox_dir)
+    if runtime_codex_home:
+        env["CODEX_HOME"] = runtime_codex_home
     used_timeout = timeout_s if isinstance(timeout_s, (int, float)) and timeout_s > 0 else None
     stdout_text = ""
     stderr_text = ""
