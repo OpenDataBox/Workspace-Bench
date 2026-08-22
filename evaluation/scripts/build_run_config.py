@@ -211,7 +211,7 @@ def build_config(args: argparse.Namespace) -> Path:
         config["deepseek_harness_runtime"] = {
             "expected_sdk_version": "0.1.0rc7",
             "provider": "deepseek-official",
-            "profile": "jsonrpc-agent-minimal-99f6f02",
+            "profile": "jsonrpc-agent-office-skills-12c3f46",
             "max_tokens": int(max_tokens) if max_tokens is not None else None,
         }
     if task_limit is not None:

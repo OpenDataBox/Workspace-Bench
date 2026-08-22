@@ -24,6 +24,7 @@ services:
       WORKSPACE_BENCH_CLAUDE_CONFIG_DIR: /opt/workspace-bench/agent-homes/claude/.claude
       WORKSPACE_BENCH_OPENCLAW_SKILLS_DIR: /opt/workspace-bench/agent-homes/openclaw/.openclaw/skills
       WORKSPACE_BENCH_DEEPAGENTS_SKILLS_DIR: /opt/workspace-bench/agent-homes/deepagents/.deepagents/skills
+      WORKSPACE_BENCH_DSH_SKILLS_DIR: /opt/workspace-bench/agent-homes/dsh/.dsh/skills
     volumes:
       - ../..:/workspace/Workspace-Bench
       - pip-cache:/root/.cache/pip
@@ -71,6 +72,7 @@ services:
       WORKSPACE_BENCH_CLAUDE_CONFIG_DIR: /opt/workspace-bench/agent-homes/claude/.claude
       WORKSPACE_BENCH_OPENCLAW_SKILLS_DIR: /opt/workspace-bench/agent-homes/openclaw/.openclaw/skills
       WORKSPACE_BENCH_DEEPAGENTS_SKILLS_DIR: /opt/workspace-bench/agent-homes/deepagents/.deepagents/skills
+      WORKSPACE_BENCH_DSH_SKILLS_DIR: /opt/workspace-bench/agent-homes/dsh/.dsh/skills
       WORKSPACE_BENCH_TASK_STORAGE_QUOTA_MODE: ${WORKSPACE_BENCH_TASK_STORAGE_QUOTA_MODE:-docker-layer}
       HOME: /tmp/home
       XDG_CACHE_HOME: /tmp/cache
