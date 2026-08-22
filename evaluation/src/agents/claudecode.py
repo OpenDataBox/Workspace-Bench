@@ -14,6 +14,24 @@ def _ensure_dir(p: str) -> None:
     os.makedirs(p, exist_ok=True)
 
 
+def _materialize_claude_config(sandbox_dir: str) -> Optional[str]:
+    """Copy image-installed Claude Code skills to a writable per-case config."""
+    template = str(
+        os.environ.get("WORKSPACE_BENCH_CLAUDE_CONFIG_DIR")
+        or ""
+    ).strip()
+    if not template or not os.path.isdir(template):
+        return None
+    destination = os.path.join(os.path.abspath(sandbox_dir), "claude_config", ".claude")
+    try:
+        import shutil
+
+        shutil.copytree(template, destination, dirs_exist_ok=True)
+    except OSError:
+        return None
+    return destination
+
+
 def _write_json(path: str, obj: Json) -> None:
     _ensure_dir(os.path.dirname(os.path.abspath(path)))
     with open(path, "w", encoding="utf-8") as f:
@@ -199,6 +217,9 @@ def run(
     _write_json(cfg_path, cfg)
 
     env = os.environ.copy()
+    runtime_claude_config = _materialize_claude_config(sandbox_dir)
+    if runtime_claude_config:
+        env["WORKSPACE_BENCH_CLAUDE_CONFIG_DIR"] = runtime_claude_config
     if isinstance(provider_type, str) and provider_type.strip().lower() == "anthropic":
         if isinstance(api_key, str) and api_key.strip():
             env["ANTHROPIC_AUTH_TOKEN"] = api_key.strip()

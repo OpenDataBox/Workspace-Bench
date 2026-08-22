@@ -248,6 +248,28 @@ def _build_openclaw_temp_config(
     agents["defaults"] = defaults
     cfg["agents"] = agents
 
+    # OpenClaw normally discovers workspace skills from the mutable task
+    # workspace.  Keep the benchmark Office skills in the image and add that
+    # read-only source at the lowest precedence so task-local skills may still
+    # override them when a task intentionally provides one.
+    shared_skills_dir = os.environ.get("WORKSPACE_BENCH_OPENCLAW_SKILLS_DIR", "").strip()
+    if shared_skills_dir:
+        skills_cfg = cfg.get("skills")
+        if not isinstance(skills_cfg, dict):
+            skills_cfg = {}
+        load_cfg = skills_cfg.get("load")
+        if not isinstance(load_cfg, dict):
+            load_cfg = {}
+        extra_dirs = load_cfg.get("extraDirs")
+        if not isinstance(extra_dirs, list):
+            extra_dirs = []
+        extra_dirs = [str(item) for item in extra_dirs if isinstance(item, str) and item.strip()]
+        if shared_skills_dir not in extra_dirs:
+            extra_dirs.insert(0, shared_skills_dir)
+        load_cfg["extraDirs"] = extra_dirs
+        skills_cfg["load"] = load_cfg
+        cfg["skills"] = skills_cfg
+
     _write_json(dst_path, cfg)
     return dst_path
 

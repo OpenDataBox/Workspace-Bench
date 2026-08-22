@@ -2,6 +2,7 @@ import ast
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -18,6 +19,10 @@ DEEPAGENTS_ROOT = os.path.abspath(
     or os.path.join(os.environ.get("WORKSPACE_BENCH_ROOT") or os.environ.get("RIP_BENCH_ROOT") or _default_rip_bench_root(), "deepagents")
 )
 DEEPAGENTS_LIB_PROJECT = os.path.join(DEEPAGENTS_ROOT, "libs", "deepagents")
+DEEPAGENTS_OFFICE_SKILLS_DIR = os.path.abspath(
+    os.environ.get("WORKSPACE_BENCH_DEEPAGENTS_SKILLS_DIR")
+    or "/opt/workspace-bench/agent-homes/deepagents/.deepagents/skills"
+)
 
 
 def _ensure_dir(p: str) -> None:
@@ -33,6 +38,24 @@ def _write_json(path: str, obj: Json) -> None:
 def _read_json(path: str) -> Json:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _materialize_skills_for_workdir(work_dir: str) -> Optional[str]:
+    """Expose image-installed DeepAgents skills inside its virtual filesystem.
+
+    ``LocalShellBackend(..., virtual_mode=True)`` only permits skill sources
+    below ``work_dir``.  Copying the immutable image pack into the hidden,
+    task-local ``.agents/skills`` location preserves that boundary while the
+    runner's output collector ignores hidden support directories.
+    """
+    if not os.path.isdir(DEEPAGENTS_OFFICE_SKILLS_DIR):
+        return None
+    target = os.path.join(os.path.abspath(work_dir), ".agents", "skills")
+    try:
+        shutil.copytree(DEEPAGENTS_OFFICE_SKILLS_DIR, target, dirs_exist_ok=True)
+    except OSError:
+        return None
+    return "/.agents/skills"
 
 
 def _iso_from_ts(ts: float) -> str:
@@ -338,7 +361,9 @@ def main():
         inherit_env=True,
         timeout=int(cfg.get("timeout_s") or 120),
     )
-    agent = create_deep_agent(model=model, backend=backend)
+    skill_source = cfg.get("skills_source")
+    skills = [str(skill_source)] if isinstance(skill_source, str) and skill_source else None
+    agent = create_deep_agent(model=model, backend=backend, skills=skills)
     result = None
     err = None
     retries = int(cfg.get("max_retries") or 3)
@@ -426,6 +451,7 @@ def run(
         {
             "prompt": str(prompt or ""),
             "work_dir": os.path.abspath(work_dir),
+            "skills_source": _materialize_skills_for_workdir(work_dir),
             "timeout_s": int(timeout_s) if isinstance(timeout_s, (int, float)) else 120,
             "base_url": base_url,
             "model": str(model),

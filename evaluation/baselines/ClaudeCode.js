@@ -277,6 +277,11 @@ async function _runTaskImpl(task, opts, startedAt, startMs) {
 
   const env = buildEnv(task.customProvider);
   if (task.cwd) env.HOME = task.cwd;
+  // The benchmark task changes HOME to its disposable work directory. Keep
+  // Claude Code's installed Skills in the immutable image-level config root
+  // instead of making the SDK search the empty task-local ~/.claude directory.
+  env.CLAUDE_CONFIG_DIR = process.env.WORKSPACE_BENCH_CLAUDE_CONFIG_DIR
+    || '/opt/workspace-bench/agent-homes/claude/.claude';
   const timeoutSec = task.timeout ?? 300;
   const abortController = new AbortController();
 

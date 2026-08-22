@@ -19,6 +19,11 @@ services:
       RIP_BENCH_EVAL_ROOT: /workspace/Workspace-Bench/evaluation
       DEEPAGENTS_ROOT: /workspace/Workspace-Bench/deepagents
       CODEX_SANDBOX_MODE: danger-full-access
+      CODEX_HOME: /opt/workspace-bench/agent-homes/codex/.codex
+      WORKSPACE_BENCH_CODEX_HOME_TEMPLATE: /opt/workspace-bench/agent-homes/codex/.codex
+      WORKSPACE_BENCH_CLAUDE_CONFIG_DIR: /opt/workspace-bench/agent-homes/claude/.claude
+      WORKSPACE_BENCH_OPENCLAW_SKILLS_DIR: /opt/workspace-bench/agent-homes/openclaw/.openclaw/skills
+      WORKSPACE_BENCH_DEEPAGENTS_SKILLS_DIR: /opt/workspace-bench/agent-homes/deepagents/.deepagents/skills
     volumes:
       - ../..:/workspace/Workspace-Bench
       - pip-cache:/root/.cache/pip
@@ -59,6 +64,11 @@ services:
       RIP_BENCH_EVAL_ROOT: /workspace/Workspace-Bench/evaluation
       DEEPAGENTS_ROOT: /workspace/Workspace-Bench/deepagents
       CODEX_SANDBOX_MODE: workspace-write
+      CODEX_HOME: /opt/workspace-bench/agent-homes/codex/.codex
+      WORKSPACE_BENCH_CODEX_HOME_TEMPLATE: /opt/workspace-bench/agent-homes/codex/.codex
+      WORKSPACE_BENCH_CLAUDE_CONFIG_DIR: /opt/workspace-bench/agent-homes/claude/.claude
+      WORKSPACE_BENCH_OPENCLAW_SKILLS_DIR: /opt/workspace-bench/agent-homes/openclaw/.openclaw/skills
+      WORKSPACE_BENCH_DEEPAGENTS_SKILLS_DIR: /opt/workspace-bench/agent-homes/deepagents/.deepagents/skills
       HOME: /tmp/home
       XDG_CACHE_HOME: /tmp/cache
       PIP_CACHE_DIR: /tmp/pip-cache
