@@ -1,0 +1,4 @@
+services:
+  workspace-bench-task:
+    storage_opt:
+      size: ${WORKSPACE_BENCH_TASK_STORAGE:-20480m}

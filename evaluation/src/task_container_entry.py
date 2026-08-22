@@ -122,6 +122,11 @@ def _resource_profile(config: dict[str, Json]) -> dict[str, Json]:
     }
 
 
+def _storage_quota_mode() -> str:
+    value = str(os.environ.get("WORKSPACE_BENCH_TASK_STORAGE_QUOTA_MODE") or "docker-layer").strip().lower()
+    return "case-directory-watchdog" if value == "case-directory-watchdog" else "docker-layer"
+
+
 def _write_record(path: Path, value: dict[str, Json]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -181,6 +186,7 @@ def main() -> int:
         "durationMs": int((finished - started) * 1000),
         "timeoutSeconds": timeout_seconds,
         "resourceProfile": resources,
+        "storageQuotaMode": _storage_quota_mode(),
         "storageBytesObserved": _directory_size(case_dir),
         "terminationReason": reason,
         "processGroupTerminated": reason is not None,
