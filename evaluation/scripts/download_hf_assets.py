@@ -10,14 +10,6 @@ from pathlib import Path
 from typing import Any, Dict
 
 
-EVAL_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = EVAL_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
-from task_patches import apply_task_patches
-
-
 LANGUAGE_ALIASES = {
     "en": "en",
     "cn": "cn",
@@ -524,11 +516,8 @@ def download_tasks(
             else:
                 shutil.copy2(child, target)
         count = _normalize_task_metadata_files(dst, expected_language=language)
-        patched = apply_task_patches(dst, kind=kind, language=language)
         _write_language_marker(dst, language)
         print(f"[ok] downloaded {count} {language} {kind} task directories to {dst}")
-        if patched:
-            print(f"[ok] applied {len(patched)} repository task patches: {', '.join(patched)}")
         return
 
     preferred_csv = snapshot / metadata_csv
@@ -536,11 +525,8 @@ def download_tasks(
     if not csv_path:
         raise SystemExit(f"No task directories or CSV file found in {snapshot}")
     count = _materialize_csv(csv_path, dst, expected_language=language)
-    patched = apply_task_patches(dst, kind=kind, language=language)
     _write_language_marker(dst, language)
     print(f"[ok] materialized {count} {language} {kind} metadata files under {dst}")
-    if patched:
-        print(f"[ok] applied {len(patched)} repository task patches: {', '.join(patched)}")
 
 
 def download_workspaces(eval_root: Path, revision: str | None, force: bool, language: str) -> None:
