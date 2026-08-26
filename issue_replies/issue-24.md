@@ -1,6 +1,6 @@
 # Issue #24 回复草稿
 
-感谢指出这两个任务合同中的不一致，现已修复：
+感谢指出这两个任务合同中的不一致。修复已提交至 PR #25（https://github.com/OpenDataBox/Workspace-Bench/pull/25），该 PR 关联并将在合并后关闭本 issue。现已修复：
 
 - **Task 269**
   - `output_files` 已从 `2024 年 12 月客户对账分析报告.docx` 改为 `2024 年 12 月客户对账分析报告.md`。

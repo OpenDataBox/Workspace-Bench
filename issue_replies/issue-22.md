@@ -1,6 +1,6 @@
 # Issue #22 回复草稿
 
-感谢详细核查。该 issue 提到的 3 个任务已在仓库侧加入下载后修正规则：
+感谢详细核查。修复已提交至 PR #25（https://github.com/OpenDataBox/Workspace-Bench/pull/25），该 PR 关联并将在合并后关闭本 issue。该 issue 提到的 3 个任务已在仓库侧加入下载后修正规则：
 
 - **Task 23**
   - 已将 `当前库存物品总清单_2024-12.xlsx` 加入任务包、`data_manifest` 和 `file_dep_graph`。
