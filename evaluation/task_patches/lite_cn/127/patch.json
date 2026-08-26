@@ -1,5 +1,0 @@
-{
-  "metadata": {
-    "task": "测试项目文件夹的python目录下有8个python文件，帮我总结其中使用的第三方依赖并生成一份 requirement.txt 文件。"
-  }
-}
