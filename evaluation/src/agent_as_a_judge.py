@@ -249,7 +249,7 @@ def _resolve_original_task_source(meta: Dict[str, Json]) -> Optional[str]:
 
 
 def _build_trace_snapshot(task_dir: str) -> Dict[str, Json]:
-    """Build the field-filtered execution snapshot exposed to the judge agent."""
+    """Build a judge-facing trace with tool outcomes and matching starts folded together."""
     agent_json = _safe_load_json(os.path.join(task_dir, "agent.json"))
     if not isinstance(agent_json, dict):
         return {"taskDir": os.path.abspath(task_dir), "workDir": None, "events": []}
@@ -262,21 +262,42 @@ def _build_trace_snapshot(task_dir: str) -> Dict[str, Json]:
         else []
     )
 
-    events: List[Dict[str, Json]] = []
+    events: List[Optional[Dict[str, Json]]] = []
+    pending = {}
+    terminal_statuses = {"completed", "failed", "error", "timeout", "cancelled"}
     for item in execution_trace:
         if not isinstance(item, dict):
             continue
         ev_type = item.get("type")
         if ev_type == "tool":
-            events.append(
-                {
-                    "type": "tool",
-                    "tool": item.get("tool"),
-                    "input": item.get("input") if isinstance(item.get("input"), dict) else {},
-                    "output": item.get("output") if isinstance(item.get("output"), dict) else {},
-                    "timestamp": item.get("timestamp"),
-                }
-            )
+            output = item.get("output")
+            event = {
+                "type": "tool",
+                "tool": item.get("tool"),
+                "input": item.get("input") if isinstance(item.get("input"), dict) else {},
+                "output": output if isinstance(output, (str, dict, list)) else {},
+                "timestamp": item.get("timestamp"),
+            }
+            for field in ("callID", "status", "exitCode", "startedAt", "finishedAt", "durationMs"):
+                if field in item:
+                    event[field] = item[field]
+
+            call_id = item.get("callID")
+            tool = item.get("tool")
+            status = item.get("status")
+            if type(call_id) in (str, int) and call_id != "" and isinstance(tool, str):
+                key = (tool, call_id)
+                if status == "in_progress":
+                    pending[key] = len(events)
+                elif isinstance(status, str) and status in terminal_statuses and key in pending:
+                    index = pending.pop(key)
+                    start = events[index]
+                    if start is not None:
+                        event["startedAt"] = start.get("startedAt") or start.get("timestamp")
+                        if not event["input"]:
+                            event["input"] = start["input"]
+                        events[index] = None
+            events.append(event)
         elif ev_type == "text":
             content = item.get("content")
             if isinstance(content, str):
@@ -292,8 +313,9 @@ def _build_trace_snapshot(task_dir: str) -> Dict[str, Json]:
     return {
         "taskDir": os.path.abspath(task_dir),
         "workDir": work_dir,
-        "events": events,
+        "events": [event for event in events if event is not None],
     }
+
 
 
 def _prepare_judge_view(*, sandbox_try_dir: str, task_dir: str, meta: Dict[str, Json]) -> Dict[str, str]:
