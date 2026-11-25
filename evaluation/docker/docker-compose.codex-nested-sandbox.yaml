@@ -1,0 +1,6 @@
+services:
+  workspace-bench-task:
+    user: "${WORKSPACE_BENCH_TASK_UID:?set task UID}:${WORKSPACE_BENCH_TASK_GID:?set task GID}"
+    security_opt:
+      - "seccomp=${WORKSPACE_BENCH_TASK_SECCOMP:?set an absolute seccomp JSON path}"
+      - "apparmor=${WORKSPACE_BENCH_TASK_APPARMOR:-codex-security-container}"

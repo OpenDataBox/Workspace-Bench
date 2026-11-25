@@ -181,11 +181,62 @@ def _storage_quota_override(compose_file: Path) -> Path:
     return compose_file.with_name("docker-compose.storage-quota.yaml")
 
 
+def _codex_sandbox_overrides(
+    *, enabled: bool, harness: str | None, compose_file: Path, env: dict[str, str]
+) -> list[Path]:
+    if not enabled:
+        return []
+    if harness != "codex":
+        raise SystemExit("--codex-nested-sandbox requires --harness codex")
+    if not sys.platform.startswith("linux") or os.getuid() == 0:
+        raise SystemExit("--codex-nested-sandbox requires a non-root Linux launcher user")
+    profile = Path(env.get("WORKSPACE_BENCH_TASK_SECCOMP", ""))
+    if not profile.is_absolute() or not profile.is_file():
+        raise SystemExit("WORKSPACE_BENCH_TASK_SECCOMP must point to an absolute seccomp JSON file")
+    apparmor = env.get("WORKSPACE_BENCH_TASK_APPARMOR", "codex-security-container")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", apparmor) or apparmor == "unconfined":
+        raise SystemExit("WORKSPACE_BENCH_TASK_APPARMOR must name a confined AppArmor profile")
+    env.update(
+        WORKSPACE_BENCH_TASK_UID=str(os.getuid()),
+        WORKSPACE_BENCH_TASK_GID=str(os.getgid()),
+        WORKSPACE_BENCH_TASK_APPARMOR=apparmor,
+    )
+    return [compose_file.with_name("docker-compose.codex-nested-sandbox.yaml")]
+
+
+def _probe_codex_sandbox(
+    *, compose_file: Path, cwd: Path, env: dict[str, str], task_overrides: list[Path]
+) -> None:
+    command = _compose_command(
+        compose_file,
+        "workspace-bench-task",
+        [
+            "sh",
+            "-ec",
+            """profile="$(cat /proc/self/attr/current)"
+if [ "$profile" != "$WORKSPACE_BENCH_TASK_APPARMOR (enforce)" ]; then
+    printf 'Expected an enforcing task AppArmor profile, got %s\\n' "$profile" >&2
+    exit 1
+fi
+export CODEX_HOME="$(mktemp -d)"
+cd "$(mktemp -d)"
+exec codex -c 'sandbox_mode="workspace-write"' sandbox linux -- /bin/true""",
+        ],
+        compose_overrides=task_overrides,
+        service_env={"WORKSPACE_BENCH_TASK_APPARMOR": env["WORKSPACE_BENCH_TASK_APPARMOR"]},
+    )
+    result = _run(command, cwd=cwd, env=env, capture=True)
+    if result.returncode:
+        detail = result.stderr or result.stdout or f"exit status {result.returncode}"
+        raise SystemExit(f"Codex nested sandbox preflight failed:\n{detail}")
+
+
 def _storage_quota_available(
     *,
     compose_file: Path,
     cwd: Path,
     env: dict[str, str],
+    task_overrides: list[Path] | None = None,
 ) -> bool:
     """Probe Docker's task-layer quota support once before task execution.
 
@@ -201,7 +252,7 @@ def _storage_quota_available(
         compose_file,
         "workspace-bench-task",
         ["bash", "-lc", "true"],
-        compose_overrides=[quota_override],
+        compose_overrides=[*(task_overrides or []), quota_override],
     )
     result = _run(command, cwd=cwd, env=env, capture=True)
     if result.returncode == 0:
@@ -359,6 +410,10 @@ def main() -> int:
     parser.add_argument("--task-memory-mb", type=int, default=DEFAULT_RESOURCES["memory_mb"])
     parser.add_argument("--task-pids", type=int, default=DEFAULT_RESOURCES["pids"])
     parser.add_argument("--task-storage-mb", type=int, default=DEFAULT_RESOURCES["storage_mb"])
+    parser.add_argument(
+        "--codex-nested-sandbox", action="store_true",
+        help="Use host-provided seccomp and AppArmor profiles for Codex task containers.",
+    )
     # The benchmark runner has its own CLI.  Keep its flags opaque here so the
     # recommended command can remain natural (no mandatory `--` separator).
     args, raw_args = parser.parse_known_args()
@@ -396,6 +451,15 @@ def main() -> int:
         }
     )
 
+    task_overrides = _codex_sandbox_overrides(
+        enabled=args.codex_nested_sandbox,
+        harness=_value_after(base_args, "--harness"),
+        compose_file=compose_file,
+        env=env,
+    )
+    if task_overrides:
+        _probe_codex_sandbox(compose_file=compose_file, cwd=eval_root, env=env, task_overrides=task_overrides)
+
     configs = [
         _build_config(
             compose_file=compose_file,
@@ -421,7 +485,10 @@ def main() -> int:
         compose_file=compose_file,
         cwd=eval_root,
         env=env,
+        task_overrides=task_overrides,
     )
+    if storage_quota_enforced:
+        task_overrides.append(_storage_quota_override(compose_file))
 
     image = _run(
         ["docker", "image", "inspect", "--format={{.Id}}", "workspace-bench:local"],
@@ -474,7 +541,7 @@ def main() -> int:
                 "--task-id",
                 task_id,
             ],
-            compose_overrides=[_storage_quota_override(compose_file)] if storage_quota_enforced else [],
+            compose_overrides=task_overrides,
             container_name=name,
             service_env={
                 "WORKSPACE_BENCH_TASK_CONTAINER_NAME": name,
