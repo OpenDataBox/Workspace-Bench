@@ -299,18 +299,21 @@ async function _runTaskImpl(task, opts, startedAt, startMs) {
       const abs = path.isAbsolute(p) ? path.resolve(p) : path.resolve(cwdRoot, p);
       return abs === cwdRoot || abs.startsWith(cwdRoot + path.sep);
     };
-    const commandLooksSafe = (cmd) => {
-      if (typeof cmd !== 'string') return false;
-      const s = cmd;
-      if (s.includes('..') || s.includes('~/') || s.includes('~\\')) return false;
+    const bashPathRejection = (cmd) => {
+      if (typeof cmd !== 'string') return 'The command must be a string.';
+      if (cmd.includes('..') || cmd.includes('~/') || cmd.includes('~\\')) {
+        return 'The command contains restricted parent-directory or home-directory syntax.';
+      }
       const allowed = ['/bin/', '/usr/', '/System/', '/Library/', '/Applications/'];
       const re = /(^|[\s"'])(\/[^\s"']+)/g;
-      for (const m of s.matchAll(re)) {
-        const p = m[2];
-        if (allowed.some((pre) => p === pre.slice(0, -1) || p.startsWith(pre))) continue;
-        if (!isUnderCwd(p)) return false;
+      for (const m of cmd.matchAll(re)) {
+        const token = m[2];
+        if (allowed.some((pre) => token === pre.slice(0, -1) || token.startsWith(pre))) continue;
+        if (!isUnderCwd(token)) {
+          return 'Ambiguous or out-of-workspace token ' + JSON.stringify(token.slice(0, 120)) + '.';
+        }
       }
-      return true;
+      return null;
     };
 
     const q = query({
@@ -341,11 +344,12 @@ async function _runTaskImpl(task, opts, startedAt, startMs) {
               toolUseID,
             };
           }
-          if (tool === 'Bash' && cmd !== null && !commandLooksSafe(cmd)) {
+          const rejection = tool === 'Bash' && cmd !== null ? bashPathRejection(cmd) : null;
+          if (rejection !== null) {
             log(`${c.red}[deny]${c.reset} Bash`);
             return {
               behavior: 'deny',
-              message: `Bash command is not allowed because it references paths outside the task working directory.`,
+              message: `Bash path check rejected this command. ${rejection} Use paths relative to the task working directory.`,
               toolUseID,
             };
           }
