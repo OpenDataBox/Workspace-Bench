@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from judge_rubrics import validated_rubric_rows
+
 # We reuse dependency-graph builder and metadata helpers to keep I/O aligned.
 import agent_eval as _ae
 
@@ -213,6 +215,18 @@ def _json_first_object(text: str) -> Optional[Json]:
         return obj
     except Exception:
         return None
+
+
+def _can_reuse_rubrics(path: str, expected_count: int) -> bool:
+    payload = _safe_load_json(path)
+    if not isinstance(payload, dict):
+        return False
+    judge = payload.get("judge")
+    return (
+        isinstance(judge, dict)
+        and not judge.get("error")
+        and validated_rubric_rows(payload, expected_count) is not None
+    )
 
 
 def _safe_remove_path(path: str) -> None:
@@ -508,7 +522,7 @@ def evaluate_task(
         "success": True,
     }
 
-    if not overwrite and os.path.exists(rubrics_out_path):
+    if not overwrite and _can_reuse_rubrics(rubrics_out_path, len(rubrics)):
         result["rubricsSkipped"] = True
     else:
         sys_prompt = _judge_system_prompt(language)
