@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from judge_rubrics import validated_rubric_rows
+
 # We reuse dependency-graph builder and metadata helpers to keep I/O aligned.
 import agent_eval as _ae
 
@@ -563,21 +565,17 @@ def evaluate_task(
             last_text = tr.get("lastText") if isinstance(tr, dict) and isinstance(tr.get("lastText"), str) else ""
 
             judged_obj = _json_first_object(last_text)
-            if isinstance(judged_obj, dict) and isinstance(judged_obj.get("rubrics"), list):
-                for it in judged_obj.get("rubrics"):
-                    if not isinstance(it, dict):
-                        continue
-                    idx = it.get("index")
-                    passed = it.get("passed")
-                    conf = it.get("confidence")
-                    ev = it.get("evidence")
-                    if not isinstance(idx, int):
-                        continue
+            verdicts = validated_rubric_rows(judged_obj, len(rubrics))
+            if verdicts is not None:
+                for verdict in verdicts:
+                    idx = verdict["index"]
+                    conf = verdict.get("confidence")
+                    ev = verdict.get("evidence")
                     rows.append(
                         {
                             "index": idx,
-                            "rubric": rubrics[idx] if idx < len(rubrics) and isinstance(rubrics[idx], str) else None,
-                            "passed": bool(passed) if isinstance(passed, bool) else False,
+                            "rubric": rubrics[idx] if isinstance(rubrics[idx], str) else None,
+                            "passed": verdict["passed"],
                             "confidence": float(conf) if isinstance(conf, (int, float)) else None,
                             "evidence": str(ev) if isinstance(ev, str) else "",
                         }
@@ -585,7 +583,8 @@ def evaluate_task(
                 err = "" if run_out.get("status") == "ok" else (str(run_out.get("errorMessage") or "")[:2000])
                 break
 
-            err = str(run_out.get("errorMessage") or "Judge output parse failed")[:2000]
+            reason = "Judge output parse failed" if judged_obj is None else "Judge rubric verdict is incomplete or invalid"
+            err = str(run_out.get("errorMessage") or reason)[:2000]
             if tries >= max_retries:
                 break
 
