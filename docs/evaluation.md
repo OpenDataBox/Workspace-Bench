@@ -51,6 +51,34 @@ task-local `HOME` or `/tmp` state:
 python3 scripts/verify_task_container_reset.py
 ```
 
+### Codex inside an AppArmor-restricted Docker task container
+
+On Linux hosts that restrict unprivileged user namespaces, Docker's default
+security profiles can stop Bubblewrap before a Codex `workspace-write` task
+starts. An administrator can load a dedicated AppArmor profile and install
+a corresponding seccomp policy. See the [OpenAI Codex Security reference
+profiles](https://github.com/openai/codex-security/tree/256cddf5eb503a8e34b991c86265ec85776a9b07/docker)
+for a pinned example. Follow that project's AppArmor loading instructions on
+the Docker host. Review the profiles for the intended task deployment before
+loading them.
+
+From a non-root account, set the seccomp JSON path and opt in on the launcher:
+
+```bash
+cd evaluation
+export WORKSPACE_BENCH_TASK_SECCOMP=/absolute/path/to/codex-security-seccomp.json
+export WORKSPACE_BENCH_TASK_APPARMOR=codex-security-container
+python3 scripts/run_isolated_benchmark.py --codex-nested-sandbox \
+  --harness codex --model kimi-k2.5 --dataset lite --task-ids 159
+```
+
+The launcher probes Bubblewrap before running tasks and applies these
+profiles only to `workspace-bench-task`. The merged service runs with the
+launcher's non-root UID/GID, a read-only root filesystem, all container
+capabilities dropped, and `no-new-privileges`. Keep the task service's
+network policy appropriate for your evaluation. The seccomp profile alone
+does not enforce an egress policy. Record the profile revisions with your run.
+
 ## Supported Harnesses
 
 | Harness | Description | API Compatibility |

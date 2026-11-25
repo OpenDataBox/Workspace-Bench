@@ -102,6 +102,42 @@ class TaskContainerIsolationTests(unittest.TestCase):
         )
         self.assertIn("--rm", isolated_runner._compose_command(EVAL_ROOT / "docker" / "docker-compose.yaml", "workspace-bench-task", []))
 
+    def test_nested_codex_sandbox_is_opt_in(self):
+        compose_file = EVAL_ROOT / "docker" / "docker-compose.yaml"
+        env = {}
+        self.assertEqual(
+            isolated_runner._codex_sandbox_overrides(
+                enabled=False, harness="codex", compose_file=compose_file, env=env
+            ),
+            [],
+        )
+        self.assertEqual(env, {})
+
+    def test_nested_codex_sandbox_profiles_are_scoped_to_task_service(self):
+        compose_file = EVAL_ROOT / "docker" / "docker-compose.yaml"
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "seccomp.json"
+            profile.write_text("{}", encoding="utf-8")
+            env = {"WORKSPACE_BENCH_TASK_SECCOMP": str(profile)}
+            with (
+                mock.patch.object(isolated_runner.sys, "platform", "linux"),
+                mock.patch.object(isolated_runner.os, "getuid", return_value=1234, create=True),
+                mock.patch.object(isolated_runner.os, "getgid", return_value=2345, create=True),
+            ):
+                overrides = isolated_runner._codex_sandbox_overrides(
+                    enabled=True, harness="codex", compose_file=compose_file, env=env
+                )
+        self.assertEqual(env["WORKSPACE_BENCH_TASK_UID"], "1234")
+        self.assertEqual(env["WORKSPACE_BENCH_TASK_GID"], "2345")
+        self.assertEqual(env["WORKSPACE_BENCH_TASK_APPARMOR"], "codex-security-container")
+        self.assertEqual(len(overrides), 1)
+        services = yaml.safe_load(overrides[0].read_text(encoding="utf-8"))["services"]
+        self.assertEqual(set(services), {"workspace-bench-task"})
+        options = services["workspace-bench-task"]["security_opt"]
+        self.assertEqual(len(options), 2)
+        self.assertTrue(options[0].startswith("seccomp="))
+        self.assertTrue(options[1].startswith("apparmor="))
+
     def test_task_command_uses_storage_quota_override(self):
         compose_file = EVAL_ROOT / "docker" / "docker-compose.yaml"
         quota_file = compose_file.with_name("docker-compose.storage-quota.yaml")
